@@ -1,0 +1,82 @@
+﻿import { CommonModule } from '@angular/common';
+import { Component, OnInit, inject } from '@angular/core';
+import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
+import { ActivatedRoute, Router, RouterLink } from '@angular/router';
+import { SalesmanApiService } from '../../services/salesman-api.service';
+
+@Component({
+  selector: 'app-salesman-form',
+  standalone: true,
+  imports: [CommonModule, ReactiveFormsModule, RouterLink],
+  templateUrl: './salesman-form.component.html',
+})
+export class SalesmanFormComponent implements OnInit {
+  private readonly fb = inject(FormBuilder);
+  private readonly api = inject(SalesmanApiService);
+  private readonly route = inject(ActivatedRoute);
+  private readonly router = inject(Router);
+
+  readonly form = this.fb.nonNullable.group({
+    salesmancode: ['', [Validators.required, Validators.maxLength(20), Validators.pattern(/^[a-zA-Z0-9]+$/)]],
+    salesmanname: ['', [Validators.required, Validators.maxLength(100)]],
+    mobileno: ['', [Validators.pattern(/^[0-9]{7,15}$/)]],
+    email: ['', [Validators.email, Validators.maxLength(100)]],
+    joiningdate: [''],
+    status: [1, Validators.required],
+  });
+
+  id: number | null = null;
+  errorMessage = '';
+  saving = false;
+
+  get editMode(): boolean { return this.id !== null; }
+
+  ngOnInit(): void {
+    const id = Number(this.route.snapshot.paramMap.get('id'));
+    if (!id) return;
+
+    this.id = id;
+    this.api.getById(id).subscribe({
+      next: (salesman) => this.form.patchValue(salesman),
+      error: (error) => (this.errorMessage = this.readError(error)),
+    });
+  }
+
+  save(saveAndNew = false): void {
+    this.errorMessage = '';
+    if (this.form.invalid) {
+      this.form.markAllAsTouched();
+      return;
+    }
+
+    this.saving = true;
+    const value = this.form.getRawValue();
+    const request = this.editMode
+      ? this.api.update(this.id!, { salesmanname: value.salesmanname, mobileno: value.mobileno || undefined, email: value.email || undefined, joiningdate: value.joiningdate || undefined })
+      : this.api.create(value);
+
+    request.subscribe({
+      next: () => {
+        this.saving = false;
+        if (saveAndNew) {
+          this.form.reset({ salesmancode: '', salesmanname: '', mobileno: '', email: '', joiningdate: '', status: 1 });
+        } else {
+          this.router.navigate(['/salesman']);
+        }
+      },
+      error: (error) => {
+        this.saving = false;
+        this.errorMessage = this.readError(error);
+      },
+    });
+  }
+
+  isInvalid(name: string): boolean {
+    const control = this.form.get(name);
+    return !!control && control.invalid && control.touched;
+  }
+
+  private readError(error: any): string {
+    return error?.error?.message || 'The request could not be completed.';
+  }
+}

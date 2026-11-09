@@ -1,0 +1,641 @@
+<div class="page-container">
+  <!-- Top Header matching Wireframe Page 8 -->
+  <div class="wireframe-header">
+    <div class="wireframe-title-wrap">
+      <h1 class="wireframe-title">Marketing Teams</h1>
+    </div>
+    <div class="wireframe-breadcrumb">
+      <span>Masters</span>
+      <span class="sep">/</span>
+      <span class="current">Marketing Team</span>
+    </div>
+  </div>
+
+ 
+
+  <!-- Segmented View Tabs: Active Teams vs Deactivated Teams -->
+  <div class="view-segment-tabs">
+    <button
+      type="button"
+      class="view-tab-btn"
+      [class.active]="status === 1"
+      (click)="switchViewTab(1)"
+    >
+      <span class="tab-indicator tab-indicator-active"></span>
+      <span class="tab-label">Active Teams</span>
+      <span class="tab-pill">{{ totalActiveCount }}</span>
+    </button>
+
+    <button
+      type="button"
+      class="view-tab-btn"
+      [class.active]="status === 2"
+      (click)="switchViewTab(2)"
+    >
+      <span class="tab-indicator tab-indicator-inactive"></span>
+      <span class="tab-label">Deactivated Teams</span>
+      <span class="tab-pill">{{ totalInactiveCount }}</span>
+    </button>
+  </div>
+
+  <!-- Card Container -->
+  <div class="content-card">
+    <!-- Toolbar: Search box + New Team button -->
+    <div class="toolbar-row">
+      <div class="toolbar-filters">
+        <div class="search-input-wrap">
+          <svg class="search-icon" xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+          <input
+            type="text"
+            [(ngModel)]="search"
+            (keyup.enter)="searchTeams()"
+            placeholder="Search team code or name..."
+            class="control-input search-box"
+          />
+        </div>
+
+        <button type="button" class="btn btn-secondary btn-toolbar-search" (click)="searchTeams()">
+          Search
+        </button>
+      </div>
+
+      <div class="toolbar-actions flex items-center gap-2">
+        <button
+          type="button"
+          class="btn btn-secondary"
+          (click)="openPendingModal()"
+          title="Review salesman deactivation requests"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="m19 8 3 3-3 3"/><path d="m13 11 3-3-3-3"/></svg>
+          <span>Deactivation Requests</span>
+          <span
+            *ngIf="pendingRequests.length > 0"
+            class="ml-1 px-2 py-0.5 text-xs font-bold rounded-full bg-amber-500 text-white"
+          >
+            {{ pendingRequests.length }}
+          </span>
+        </button>
+
+        <button type="button" class="btn btn-primary" (click)="openCreateModal()">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          <span>New Team</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Syncfusion Grid matching Wireframe Columns & Widths -->
+    <div class="table-container">
+      <div *ngIf="loading" class="p-6 text-center text-slate-500">
+        <span class="spinner-sm"></span> Loading marketing teams...
+      </div>
+      <ejs-grid *ngIf="!loading" [dataSource]="result.items" [allowSorting]="true" [allowTextWrap]="true">
+        <e-columns>
+          <e-column field="teamcode" headerText="Team Code" width="150">
+            <ng-template #template let-data>
+              <button
+                type="button"
+                (click)="openViewModal(data)"
+                class="badge-code badge-code-btn font-mono font-bold text-left cursor-pointer"
+                title="View team details"
+              >
+                {{ data.teamcode }}
+              </button>
+            </ng-template>
+          </e-column>
+          <e-column field="teamname" headerText="Team Name" minWidth="220" width="300">
+            <ng-template #template let-data>
+              <span class="font-medium text-slate-800 break-words" [title]="data.teamname">{{ data.teamname }}</span>
+            </ng-template>
+          </e-column>
+          <e-column field="teamleadername" headerText="Team Leader" minWidth="180" width="220">
+            <ng-template #template let-data>
+              <span class="break-words" [title]="data.teamleadername">{{ data.teamleadername }}</span>
+            </ng-template>
+          </e-column>
+          <e-column field="salesmancount" headerText="No. of Salesmen" width="140" textAlign="Right">
+            <ng-template #template let-data>
+              <span class="font-mono font-medium">{{ data.salesmancount }}</span>
+            </ng-template>
+          </e-column>
+          <e-column field="status" headerText="Status" width="110">
+            <ng-template #template let-data>
+              <span class="badge" [class.badge-active]="data.status === 1" [class.badge-inactive]="data.status === 2">
+                {{ data.status === 1 ? 'Active' : 'Inactive' }}
+              </span>
+            </ng-template>
+          </e-column>
+          <e-column headerText="Actions" width="220" minWidth="210" textAlign="Right">
+            <ng-template #template let-data>
+              <div class="action-links">
+                <button type="button" class="action-link link-view" (click)="openViewModal(data)" title="View team details">View</button>
+                <button type="button" class="action-link link-edit" (click)="openEditModal(data)" title="Edit team">Edit</button>
+                <button type="button" class="action-link link-toggle" (click)="confirmStatusToggle(data)">
+                  {{ data.status === 1 ? 'Deactive' : 'Activate' }}
+                </button>
+              </div>
+            </ng-template>
+          </e-column>
+        </e-columns>
+      </ejs-grid>
+    </div>
+
+    <!-- Infinite Scroll Status Footer -->
+    <div class="infinite-scroll-footer">
+      <div *ngIf="loadingMore" class="infinite-loading">
+        <span class="spinner-sm"></span> Loading more teams...
+      </div>
+      <div *ngIf="!loading && !loadingMore && result.items.length > 0" class="infinite-summary">
+        Showing {{ result.items.length }} of {{ result.totalCount }} teams
+        <span *ngIf="result.items.length >= result.totalCount" class="infinite-done-badge">&bull; All records loaded</span>
+      </div>
+      <div *ngIf="!loading && result.items.length === 0" class="infinite-summary text-muted">
+        No marketing teams found.
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- =========================================================================
+     Marketing Team View Modal Dialog
+     ========================================================================= -->
+<div class="modal-backdrop" *ngIf="isViewModalOpen" (click)="closeViewModal()">
+  <div class="modal-dialog modal-xl" (click)="$event.stopPropagation()">
+    <div class="modal-header-pro">
+      <div class="modal-header-content">
+        <div class="modal-header-icon">
+          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+        </div>
+        <div>
+          <h2 class="modal-header-title">Team Overview &bull; {{ viewingTeam?.teamcode || viewingHeader?.teamcode || 'Team' }}</h2>
+          <div class="modal-header-sub">{{ viewingTeam?.teamname || viewingHeader?.teamname || 'Fetching team details' }}</div>
+        </div>
+      </div>
+      <button type="button" class="modal-close-btn" (click)="closeViewModal()" aria-label="Close">&times;</button>
+    </div>
+
+    <div class="modal-body-pro">
+      <div *ngIf="loadingView" class="py-12 text-center text-slate-500">
+        <span class="spinner-sm"></span> Loading team details and members...
+      </div>
+
+      <div *ngIf="!loadingView && viewingTeam">
+        <!-- Team Header Key-Value Info -->
+        <div class="modal-info-grid">
+          <div class="modal-info-item">
+            <span class="modal-info-label">Team Code</span>
+            <span class="modal-info-val font-mono">{{ viewingTeam.teamcode }}</span>
+          </div>
+          <div class="modal-info-item">
+            <span class="modal-info-label">Status</span>
+            <div>
+              <span class="badge" [class.badge-active]="viewingTeam.status === 1" [class.badge-inactive]="viewingTeam.status === 2">
+                {{ viewingTeam.status === 1 ? 'Active' : 'Inactive' }}
+              </span>
+            </div>
+          </div>
+          <div class="modal-info-item">
+            <span class="modal-info-label">Team Name</span>
+            <span class="modal-info-val">{{ viewingTeam.teamname }}</span>
+          </div>
+          <div class="modal-info-item">
+            <span class="modal-info-label">Team Leader</span>
+            <span class="modal-info-val text-primary font-bold">{{ viewingTeam.teamleadername }}</span>
+          </div>
+          <div class="modal-info-item" style="grid-column: span 2;">
+            <span class="modal-info-label">Description</span>
+            <span class="modal-info-val text-slate-600 font-normal">{{ viewingTeam.description || 'None' }}</span>
+          </div>
+        </div>
+
+        <!-- Members Table -->
+        <h3 class="section-heading mb-3 mt-4">
+          Assigned Members ({{ viewingTeam.members.length }})
+        </h3>
+        <div class="table-container">
+          <table class="grid-table">
+            <thead>
+              <tr>
+                <th style="width: 140px;">Salesman Code</th>
+                <th>Salesman Name</th>
+                <th style="width: 180px;">Role</th>
+                <th style="width: 160px;" class="text-right">Target Amount</th>
+                <th style="width: 110px;">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr *ngFor="let m of viewingTeam.members" class="table-row">
+                <td class="font-mono font-medium">{{ m.salesmancode }}</td>
+                <td class="font-medium text-slate-800">{{ m.salesmanname }}</td>
+                <td>{{ m.roleName }}</td>
+                <td class="text-right font-mono">{{ m.targetamount | number: '1.2-2' }}</td>
+                <td>
+                  <span class="badge" [class.badge-active]="m.status === 1" [class.badge-inactive]="m.status === 2">
+                    {{ m.status === 1 ? 'Active' : 'Inactive' }}
+                  </span>
+                </td>
+              </tr>
+              <tr *ngIf="viewingTeam.members.length === 0">
+                <td colspan="5" class="empty-cell">No members found.</td>
+              </tr>
+            </tbody>
+            <tfoot>
+              <tr class="grid-total-row">
+                <td colspan="3" class="text-right font-bold text-slate-700">Total target</td>
+                <td class="text-right font-bold font-mono text-slate-900 text-base">
+                  {{ totalTargetInView | number: '1.2-2' }}
+                </td>
+                <td></td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-footer-pro">
+      <button type="button" class="btn btn-secondary" (click)="closeViewModal()">
+        Close
+      </button>
+      
+    </div>
+  </div>
+</div>
+
+<!-- =========================================================================
+     Marketing Team Create / Edit Modal Dialog
+     ========================================================================= -->
+<div class="modal-backdrop" *ngIf="isEditModalOpen" (click)="closeEditModal()">
+  <div class="modal-dialog modal-xl" (click)="$event.stopPropagation()">
+    <div class="modal-header-pro">
+      <div class="modal-header-content">
+        <div class="modal-header-icon">
+          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" x2="19" y1="8" y2="14"/><line x1="22" x2="16" y1="11" y2="11"/></svg>
+        </div>
+        <div>
+          <h2 class="modal-header-title">{{ isEditMode ? 'Edit Marketing Team' : 'New Marketing Team' }}</h2>
+          <div class="modal-header-sub">Configure team header information and salesman assignments</div>
+        </div>
+      </div>
+      <button type="button" class="modal-close-btn" (click)="closeEditModal()" aria-label="Close">&times;</button>
+    </div>
+
+    <form [formGroup]="form" (ngSubmit)="saveTeam()" novalidate>
+      <div class="modal-body-pro">
+        <!-- Error Banner -->
+        <div *ngIf="formError" class="alert-box alert-error mb-4">
+          {{ formError }}
+        </div>
+
+        <!-- Section 1: Team Header -->
+        <div class="grid grid-3 gap-4">
+          <div class="form-field">
+            <label for="modal-teamcode" class="field-label">Team Code *</label>
+            <input
+              id="modal-teamcode"
+              type="text"
+              formControlName="teamcode"
+              (input)="onCodeInput()"
+              class="control-input uppercase"
+              [class.is-invalid]="isFieldInvalid('teamcode') || !!codeConflictError"
+              [readonly]="isEditMode"
+              placeholder="e.g. MT001"
+              maxlength="20"
+            />
+            <div *ngIf="codeConflictError" class="field-error-text">
+              {{ codeConflictError }}
+            </div>
+            <div *ngIf="isFieldInvalid('teamcode') && !codeConflictError" class="field-error-text">
+              {{ getErrorMessage('teamcode') }}
+            </div>
+          </div>
+
+          <div class="form-field">
+            <label for="modal-teamname" class="field-label">Team Name *</label>
+            <input
+              id="modal-teamname"
+              type="text"
+              formControlName="teamname"
+              class="control-input"
+              [class.is-invalid]="isFieldInvalid('teamname')"
+              placeholder="e.g. North Region Team"
+              maxlength="100"
+            />
+            <div *ngIf="isFieldInvalid('teamname')" class="field-error-text">
+              {{ getErrorMessage('teamname') }}
+            </div>
+          </div>
+
+          <div class="form-field" *ngIf="isEditMode">
+            <label for="modal-teamstatus" class="field-label">Status *</label>
+            <select id="modal-teamstatus" formControlName="status" class="control-select w-full">
+              <option [ngValue]="1">Active</option>
+              <option [ngValue]="2">Inactive</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="grid grid-2 gap-4 mt-3">
+          <div class="form-field">
+            <label for="modal-teamleaderid" class="field-label">Team Leader *</label>
+            <ejs-dropdownlist
+              id="modal-teamleaderid"
+              formControlName="teamleaderid"
+              [dataSource]="eligibleLeaders"
+              [fields]="{ text: 'displayText', value: 'id' }"
+              [allowFiltering]="true"
+              [filterType]="'Contains'"
+              [filterBarPlaceholder]="'Search eligible leader by name or code...'"
+              placeholder="Select Team Leader..."
+              (change)="onLeaderChanged($event)"
+              cssClass="control-dropdown"
+              [class.is-invalid]="isFieldInvalid('teamleaderid')"
+            >
+            </ejs-dropdownlist>
+            <div *ngIf="isFieldInvalid('teamleaderid')" class="field-error-text">
+              {{ getErrorMessage('teamleaderid') }}
+            </div>
+          </div>
+
+          <div class="form-field">
+            <label for="modal-teamdesc" class="field-label">Description *</label>
+            <input
+              id="modal-teamdesc"
+              type="text"
+              formControlName="description"
+              class="control-input"
+              [class.is-invalid]="isFieldInvalid('description')"
+              placeholder="e.g. Covers northern territory branches"
+              maxlength="500"
+            />
+            <div *ngIf="isFieldInvalid('description')" class="field-error-text">
+              {{ getErrorMessage('description') }}
+            </div>
+          </div>
+        </div>
+
+        <!-- Section 2: Team Members Interactive Grid -->
+        <div class="mt-6 border-t border-slate-200 pt-4">
+          <div class="flex items-center justify-between mb-3">
+            <div class="flex items-center gap-3">
+              <h3 class="section-heading">Team Members ({{ members.length }})</h3>
+              <button type="button" class="btn btn-secondary btn-sm" (click)="addMember()">
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+                + Add Member
+              </button>
+            </div>
+            <div class="text-xs text-muted italic">
+              Leader row auto-syncs with the Team Leader in header
+            </div>
+          </div>
+
+          <div class="table-container">
+            <table class="grid-table">
+              <thead>
+                <tr>
+                  <th style="width: 45px;">#</th>
+                  <th style="width: 140px;">Salesman Code</th>
+                  <th style="min-width: 220px;">Salesman *</th>
+                  <th style="min-width: 180px;">Role *</th>
+                  <th style="width: 160px;" class="text-right">Target Amount *</th>
+                  <th style="width: 120px;">Status</th>
+                  <th style="width: 60px;" class="text-right"></th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr *ngFor="let member of members; let i = index" class="table-row">
+                  <td class="font-mono text-muted text-xs">{{ i + 1 }}</td>
+                  <td class="font-mono font-medium text-slate-700">
+                    {{ member.salesmancode || 'auto' }}
+                  </td>
+                  <td>
+                    <ejs-dropdownlist
+                      [dataSource]="availableSalesmen(member)"
+                      [fields]="{ text: 'displayText', value: 'id' }"
+                      [value]="member.salesmanid || null"
+                      [allowFiltering]="true"
+                      [filterType]="'Contains'"
+                      [filterBarPlaceholder]="'Search salesman by name or code...'"
+                      placeholder="Select Salesman..."
+                      (change)="onMemberSalesmanChange(member, $event)"
+                      cssClass="control-dropdown"
+                    >
+                    </ejs-dropdownlist>
+                  </td>
+                  <td>
+                    <select
+                      class="control-select w-full"
+                      [ngModel]="member.role || 0"
+                      (ngModelChange)="onMemberRoleChange(member, $event)"
+                      [ngModelOptions]="{ standalone: true }"
+                      [disabled]="member.role === 1"
+                    >
+                      <option [ngValue]="0" disabled>Select Position...</option>
+                      <option *ngFor="let role of (member.role === 1 ? roleOptions : memberRoleOptions)" [ngValue]="role.value">
+                        {{ role.displayText }}
+                      </option>
+                    </select>
+                  </td>
+                  <td>
+                    <input
+                      type="number"
+                      min="0"
+                      max="999999999.99"
+                      step="0.01"
+                      class="control-input text-right font-mono"
+                      [class.is-invalid]="member.targetamount < 0 || member.targetamount > 999999999.99"
+                      [(ngModel)]="member.targetamount"
+                      [ngModelOptions]="{ standalone: true }"
+                      placeholder="0.00"
+                    />
+                  </td>
+                  <td>
+                    <span class="badge" [class.badge-active]="member.status === 1" [class.badge-inactive]="member.status === 2">
+                      {{ member.status === 1 ? 'Active' : 'Inactive' }}
+                    </span>
+                  </td>
+                  <td class="text-right">
+                    <button
+                      *ngIf="member.role !== 1"
+                      type="button"
+                      class="action-link link-del"
+                      (click)="removeMember(i)"
+                      title="Remove member row"
+                    >
+                      Del
+                    </button>
+                    <span *ngIf="member.role === 1" class="text-xs text-muted">Leader</span>
+                  </td>
+                </tr>
+
+                <tr *ngIf="members.length === 0">
+                  <td colspan="7" class="empty-cell">
+                    No members added. Click "+ Add Member" to assign salesmen (Rule R4).
+                  </td>
+                </tr>
+              </tbody>
+              <tfoot>
+                <tr class="grid-total-row">
+                  <td colspan="4" class="text-right font-bold text-slate-700">Total target</td>
+                  <td class="text-right font-bold font-mono text-slate-900 text-base">
+                    {{ totalTarget | number: '1.2-2' }}
+                  </td>
+                  <td colspan="2"></td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-footer-pro">
+        <button type="button" class="btn btn-secondary" (click)="closeEditModal()" [disabled]="savingTeam">
+          Cancel
+        </button>
+        <button type="submit" class="btn btn-primary" [disabled]="savingTeam">
+          {{ savingTeam ? 'Saving Team...' : (isEditMode ? 'Update Team' : 'Save Team') }}
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Reusable Delete / Status Confirmation Dialog -->
+<app-confirm-modal
+  [isOpen]="isModalOpen"
+  [title]="modalTitle"
+  [message]="modalMessage"
+  [subMessage]="modalSubMessage"
+  [confirmText]="modalConfirmText"
+  [iconType]="modalIconType"
+  [confirmBtnClass]="modalConfirmBtnClass"
+  [processing]="modalProcessing"
+  (confirmed)="onModalConfirm()"
+  (cancelled)="onModalCancel()"
+></app-confirm-modal>
+
+<!-- =========================================================================
+     Pending Deactivation Requests Modal
+     ========================================================================= -->
+<div class="modal-backdrop" *ngIf="isPendingModalOpen" (click)="closePendingModal()">
+  <div class="modal-dialog modal-xl" (click)="$event.stopPropagation()">
+    <div class="modal-header-pro">
+      <div class="modal-header-content">
+        <div class="modal-header-icon" style="background: rgba(245, 158, 11, 0.12); color: #d97706;">
+          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+        </div>
+        <div>
+          <h2 class="modal-header-title">Salesman Deactivation Requests</h2>
+          <div class="modal-header-sub">Review deactivation requests submitted from Salesman Master requiring marketing team approval</div>
+        </div>
+      </div>
+      <button type="button" class="modal-close-btn" (click)="closePendingModal()" aria-label="Close">&times;</button>
+    </div>
+
+    <div class="modal-body-pro">
+      <div *ngIf="loadingPendingRequests" class="p-8 text-center text-slate-500">
+        <span class="spinner-sm"></span> Loading pending requests...
+      </div>
+
+      <div *ngIf="!loadingPendingRequests && pendingRequests.length === 0" class="p-8 text-center">
+        <div class="inline-flex items-center justify-center w-12 h-12 rounded-full bg-emerald-50 text-emerald-600 mb-3">
+          <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+        </div>
+        <h3 class="text-base font-semibold text-slate-800">No Pending Requests</h3>
+        <p class="text-sm text-slate-500 mt-1">There are currently no salesman deactivation requests awaiting Marketing Master approval.</p>
+      </div>
+
+      <div *ngIf="!loadingPendingRequests && pendingRequests.length > 0" class="deactivation-requests-container">
+        <div *ngFor="let req of pendingRequests" class="deactivation-card">
+          <!-- Card Header: Salesman info + Role Badge -->
+          <div class="deactivation-card-header">
+            <div class="deactivation-salesman-info">
+              <span class="badge-code font-mono font-bold">{{ req.salesmanCode }}</span>
+              <span class="deactivation-salesman-name">{{ req.salesmanName }}</span>
+              <span class="deactivation-meta-text">
+                &bull; Requested by <strong>{{ req.requestedBy }}</strong> on {{ req.requestedDate | date:'dd-MMM-yyyy, hh:mm a' }}
+              </span>
+            </div>
+            <div>
+              <span *ngIf="isLeader(req)" class="badge-role-leader">
+                <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                <span>Team Leader</span>
+              </span>
+              <span *ngIf="!isLeader(req)" class="badge-role-member">
+                <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
+                <span>Team Member</span>
+              </span>
+            </div>
+          </div>
+
+          <!-- Card Details Grid -->
+          <div class="deactivation-grid">
+            <div class="deactivation-grid-item">
+              <span class="deactivation-grid-label">Assigned Marketing Team</span>
+              <span class="deactivation-grid-value">{{ req.teamCode }} &ndash; {{ req.teamName }}</span>
+            </div>
+            <div class="deactivation-grid-item">
+              <span class="deactivation-grid-label">Team Role</span>
+              <span class="deactivation-grid-value">{{ getRoleDisplay(req) }}</span>
+            </div>
+            <div class="deactivation-grid-item">
+              <span class="deactivation-grid-label">Request Status</span>
+              <span class="deactivation-grid-value text-amber-600 font-bold">Awaiting Your Approval</span>
+            </div>
+          </div>
+
+          <!-- Impact Box: Leader vs Member -->
+          <div *ngIf="isLeader(req)" class="deactivation-impact-box deactivation-impact-leader">
+            <div class="deactivation-impact-title">
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+              <span>Team Leader Cascading Impact:</span>
+            </div>
+            <ul class="deactivation-impact-list">
+              <li>Team <strong>{{ req.teamCode }} ({{ req.teamName }})</strong> will be deactivated.</li>
+              <li><strong>All member details</strong> inside this team will automatically be deactivated.</li>
+              <li>Salesman <strong>{{ req.salesmanCode }} ({{ req.salesmanName }})</strong> will be deactivated in Salesman Master.</li>
+            </ul>
+          </div>
+
+          <div *ngIf="!isLeader(req)" class="deactivation-impact-box deactivation-impact-member">
+            <div class="deactivation-impact-title">
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+              <span>Team Member Deactivation Impact:</span>
+            </div>
+            <ul class="deactivation-impact-list">
+              <li>Salesman's membership row inside team <strong>{{ req.teamCode }} ({{ req.teamName }})</strong> will be deactivated.</li>
+              <li>Salesman <strong>{{ req.salesmanCode }} ({{ req.salesmanName }})</strong> will be deactivated in Salesman Master.</li>
+              <li>The team <strong>{{ req.teamCode }}</strong> and its other members will remain active.</li>
+            </ul>
+          </div>
+
+          <!-- Actions Bar -->
+          <div class="deactivation-card-actions">
+            <button
+              type="button"
+              class="btn-reject-request"
+              (click)="rejectRequest(req)"
+              [disabled]="processingRequestId === req.id"
+            >
+              Reject Request
+            </button>
+            <button
+              type="button"
+              class="btn-approve-request"
+              (click)="approveRequest(req)"
+              [disabled]="processingRequestId === req.id"
+            >
+              <span *ngIf="processingRequestId === req.id" class="spinner-sm"></span>
+              <span>{{ processingRequestId === req.id ? 'Processing...' : (isLeader(req) ? 'Approve & Deactivate Team' : 'Approve & Deactivate Member') }}</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-footer-pro">
+      <button type="button" class="btn btn-secondary" (click)="closePendingModal()">
+        Close
+      </button>
+    </div>
+  </div>
+</div>

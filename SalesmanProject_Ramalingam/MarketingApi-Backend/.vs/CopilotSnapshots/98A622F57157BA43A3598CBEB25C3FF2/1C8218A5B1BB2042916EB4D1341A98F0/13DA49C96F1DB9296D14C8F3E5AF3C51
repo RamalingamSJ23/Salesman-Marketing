@@ -1,0 +1,40 @@
+﻿<section class="page-card wide-card" *ngIf="team as currentTeam; else loadingOrError">
+  <div class="page-heading">
+    <div>
+      <h1>Marketing Team: {{ currentTeam.teamcode }}</h1>
+      <p>Read-only team details and salesman assignments.</p>
+    </div>
+    <div class="heading-actions">
+      <a class="button primary" [routerLink]="['/marketing-team', currentTeam.id, 'edit']">Edit</a>
+      <a class="button" routerLink="/marketing-team">Back to list</a>
+    </div>
+  </div>
+
+  <div class="details-grid">
+    <div><span>Team Code</span><strong>{{ currentTeam.teamcode }}</strong></div>
+    <div><span>Team Name</span><strong>{{ currentTeam.teamname }}</strong></div>
+    <div><span>Team Leader</span><strong>{{ currentTeam.teamleadername }}</strong></div>
+    <div><span>Status</span><strong>{{ currentTeam.statusName || (currentTeam.status === 1 ? 'Active' : 'Inactive') }}</strong></div>
+    <div class="full-width"><span>Description</span><strong>{{ currentTeam.description || '-' }}</strong></div>
+  </div>
+
+  <div class="section-title">Team Members</div>
+  <div class="table-wrapper">
+    <table>
+      <thead><tr><th>#</th><th>Salesman Code</th><th>Salesman</th><th>Role</th><th>Target Amount</th><th>Status</th></tr></thead>
+      <tbody>
+        <tr *ngFor="let member of currentTeam.members; let i = index">
+          <td>{{ i + 1 }}</td><td>{{ member.salesmancode }}</td><td>{{ member.salesmanname }}</td>
+          <td>{{ member.roleName }}</td><td>{{ member.targetamount | number: '1.2-2' }}</td>
+          <td><span class="status" [class.inactive]="member.status === 2">{{ member.statusName || (member.status === 1 ? 'Active' : 'Inactive') }}</span></td>
+        </tr>
+        <tr *ngIf="currentTeam.members.length === 0"><td colspan="6" class="empty">No team members found.</td></tr>
+      </tbody>
+      <tfoot><tr><td colspan="4"><strong>Total Target Amount</strong></td><td><strong>{{ currentTeam.totalTargetAmount || 0 | number: '1.2-2' }}</strong></td><td></td></tr></tfoot>
+    </table>
+  </div>
+</section>
+
+<ng-template #loadingOrError>
+  <section class="page-card"><p class="loading" *ngIf="loading">Loading team...</p><p class="error" *ngIf="errorMessage">{{ errorMessage }}</p></section>
+</ng-template>

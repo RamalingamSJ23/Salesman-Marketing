@@ -1,0 +1,378 @@
+<div class="page-container">
+  <!-- Top Header with Breadcrumbs matching Wireframe Page 6 -->
+  <div class="wireframe-header">
+    <div class="wireframe-title-wrap">
+      <h1 class="wireframe-title">Salesman Master</h1>
+    </div>
+    <div class="wireframe-breadcrumb">
+      <span>Masters</span>
+      <span class="sep">/</span>
+      <span>Salesman</span>
+      <span class="sep">/</span>
+      <span class="current">{{ status === 1 ? 'Active' : 'Deactivated' }}</span>
+    </div>
+  </div>
+
+  <!-- Active / Deactivated View Segment Tabs -->
+  <div class="view-segment-tabs">
+    <button
+      type="button"
+      class="view-tab-btn"
+      [class.active]="status === 1"
+      (click)="switchViewTab(1)"
+    >
+      <span class="tab-dot active"></span>
+      <span>Active Salesmen</span>
+      <span class="tab-count-badge">{{ totalActiveCount || activeCount }}</span>
+    </button>
+    <button
+      type="button"
+      class="view-tab-btn"
+      [class.active]="status === 2"
+      (click)="switchViewTab(2)"
+    >
+      <span class="tab-dot inactive"></span>
+      <span>Deactivated Salesmen</span>
+      <span class="tab-count-badge">{{ totalInactiveCount || inactiveCount }}</span>
+    </button>
+  </div>
+
+  <!-- Card Container -->
+  <div class="content-card">
+    <!-- Toolbar: Search, New Salesman button -->
+    <div class="toolbar-row">
+      <div class="toolbar-filters">
+        <div class="search-input-wrap">
+          <svg class="search-icon" xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+          <input
+            type="text"
+            [(ngModel)]="search"
+            (ngModelChange)="onSearchChange()"
+            placeholder="Search code, name, mobile..."
+            class="control-input search-box"
+          />
+        </div>
+      </div>
+
+      <div class="toolbar-actions">
+        <button *ngIf="status === 1" type="button" class="btn btn-primary" (click)="openCreateModal()">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          <span>New Salesman</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Syncfusion Grid matching Wireframe Columns & Widths -->
+    <div class="table-container">
+      <div *ngIf="loading" class="p-6 text-center text-slate-500">
+        <span class="spinner-sm"></span> Loading salesmen...
+      </div>
+      <ejs-grid *ngIf="!loading" [dataSource]="result.items" [allowSorting]="true" [allowTextWrap]="true">
+        <e-columns>
+          <e-column field="salesmancode" headerText="Salesman Code" width="155">
+            <ng-template #template let-data>
+              <span class="badge-code font-mono font-bold">{{ data.salesmancode }}</span>
+            </ng-template>
+          </e-column>
+          <e-column field="salesmanname" headerText="Salesman Name" minWidth="220" width="300">
+            <ng-template #template let-data>
+              <span class="font-medium text-slate-800 break-words" [title]="data.salesmanname">{{ data.salesmanname }}</span>
+            </ng-template>
+          </e-column>
+          <e-column field="mobileno" headerText="Mobile No" width="140">
+            <ng-template #template let-data>
+              <span>{{ data.mobileno || '-' }}</span>
+            </ng-template>
+          </e-column>
+          <e-column field="email" headerText="Email" width="200">
+            <ng-template #template let-data>
+              <span>{{ data.email || '-' }}</span>
+            </ng-template>
+          </e-column>
+          <e-column field="joiningdate" headerText="Joining Date" width="130">
+            <ng-template #template let-data>
+              <span>{{ data.joiningdate ? (data.joiningdate | date: 'dd-MMM-yyyy') : '-' }}</span>
+            </ng-template>
+          </e-column>
+          <e-column field="status" headerText="Status" width="165" minWidth="160">
+            <ng-template #template let-data>
+              <div class="status-cell-wrap">
+                <span class="badge" [class.badge-active]="data.status === 1" [class.badge-inactive]="data.status === 2">
+                  {{ data.status === 1 ? 'Active' : 'Inactive' }}
+                </span>
+                <span
+                  *ngIf="data.hasPendingDeactivation"
+                  class="badge-pending-pill"
+                  [title]="'Approval pending: ' + (data.pendingDeactivationRole || 'Member') + ' of team ' + (data.pendingDeactivationTeam || '')"
+                >
+                  <span class="pulse-dot-amber"></span>
+                  <span>Pending Approval</span>
+                </span>
+              </div>
+            </ng-template> 
+          </e-column>
+          <e-column headerText="Actions" width="180" minWidth="175" textAlign="Right">
+            <ng-template #template let-data>
+              <div class="action-links">
+                <button type="button" class="action-link link-edit" (click)="openEditModal(data)" title="Edit salesman">Edit</button>
+                <button
+                  type="button"
+                  class="action-link link-toggle"
+                  [class.action-link-disabled]="data.hasPendingDeactivation"
+                  [disabled]="data.hasPendingDeactivation"
+                  (click)="!data.hasPendingDeactivation && confirmStatusToggle(data)"
+                  [title]="data.hasPendingDeactivation ? 'Deactivation request is pending Marketing Master approval' : (data.status === 1 ? 'Deactivate salesman' : 'Activate salesman')"
+                >
+                  {{ data.status === 1 ? 'Deactive' : 'Activate' }}
+                </button>
+              </div>
+            </ng-template>
+          </e-column>
+        </e-columns>
+      </ejs-grid>
+    </div>
+
+    <!-- Infinite Scroll Status Footer -->
+    <div class="infinite-scroll-footer">
+      <div *ngIf="loadingMore" class="infinite-loading">
+        <span class="spinner-sm"></span> Loading more salesmen...
+      </div>
+      <div *ngIf="!loading && !loadingMore && result.items.length > 0" class="infinite-summary">
+        Showing {{ result.items.length }} of {{ result.totalCount }} salesmen
+        <span *ngIf="result.items.length >= result.totalCount" class="infinite-done-badge">&bull; All records loaded</span>
+      </div>
+      <div *ngIf="!loading && result.items.length === 0" class="infinite-summary text-muted">
+        No salesmen found.
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- =========================================================================
+     Salesman View Modal Dialog
+     ========================================================================= -->
+<div class="modal-backdrop" *ngIf="isViewModalOpen && viewingSalesman" (click)="closeViewModal()">
+  <div class="modal-dialog modal-md" (click)="$event.stopPropagation()">
+    <div class="modal-header-pro">
+      <div class="modal-header-content">
+        <div class="modal-header-icon">
+          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+        </div>
+        <div>
+          <h2 class="modal-header-title">Salesman Details</h2>
+          <div class="modal-header-sub">Code: <span class="font-mono font-bold text-slate-800">{{ viewingSalesman.salesmancode }}</span></div>
+        </div>
+      </div>
+      <button type="button" class="modal-close-btn" (click)="closeViewModal()" aria-label="Close">&times;</button>
+    </div>
+
+    <div class="modal-body-pro">
+      <div class="modal-info-grid">
+        <div class="modal-info-item">
+          <span class="modal-info-label">Salesman Code</span>
+          <span class="modal-info-val font-mono">{{ viewingSalesman.salesmancode }}</span>
+        </div>
+        <div class="modal-info-item">
+          <span class="modal-info-label">Status</span>
+          <div>
+            <span class="badge" [class.badge-active]="viewingSalesman.status === 1" [class.badge-inactive]="viewingSalesman.status === 2">
+              {{ viewingSalesman.status === 1 ? 'Active' : 'Inactive' }}
+            </span>
+          </div>
+        </div>
+        <div class="modal-info-item" style="grid-column: span 2;">
+          <span class="modal-info-label">Full Name</span>
+          <span class="modal-info-val text-slate-900">{{ viewingSalesman.salesmanname }}</span>
+        </div>
+        <div class="modal-info-item">
+          <span class="modal-info-label">Mobile Number</span>
+          <span class="modal-info-val font-mono">{{ viewingSalesman.mobileno || '-' }}</span>
+        </div>
+        <div class="modal-info-item">
+          <span class="modal-info-label">Email Address</span>
+          <span class="modal-info-val">{{ viewingSalesman.email || '-' }}</span>
+        </div>
+        <div class="modal-info-item" style="grid-column: span 2;">
+          <span class="modal-info-label">Joining Date</span>
+          <span class="modal-info-val">{{ viewingSalesman.joiningdate ? (viewingSalesman.joiningdate | date: 'dd-MMMM-yyyy') : 'Not specified' }}</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-footer-pro">
+      <button type="button" class="btn btn-secondary" (click)="closeViewModal()">
+        Close
+      </button>
+      <button
+        type="button"
+        class="btn btn-primary"
+        (click)="closeViewModal(); openEditModal(viewingSalesman)"
+      >
+        Edit Salesman
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- =========================================================================
+     Salesman Create / Edit Modal Dialog
+     ========================================================================= -->
+<div class="modal-backdrop" *ngIf="isEditModalOpen" (click)="closeEditModal()">
+  <div class="modal-dialog modal-lg" (click)="$event.stopPropagation()">
+    <div class="modal-header-pro">
+      <div class="modal-header-content">
+        <div class="modal-header-icon">
+          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+        </div>
+        <div>
+          <h2 class="modal-header-title">{{ isEditMode ? 'Edit Salesman' : 'New Salesman' }}</h2>
+          <div class="modal-header-sub">{{ isEditMode ? 'Update salesman details' : 'Add a new salesman record with full validation' }}</div>
+        </div>
+      </div>
+      <button type="button" class="modal-close-btn" (click)="closeEditModal()" aria-label="Close">&times;</button>
+    </div>
+
+    <form [formGroup]="form" (ngSubmit)="saveSalesman()" novalidate>
+      <div class="modal-body-pro">
+        <!-- Error banner if any -->
+        <div *ngIf="formError" class="alert-box alert-error mb-4">
+          {{ formError }}
+        </div>
+
+        <div class="wireframe-form-grid">
+          <!-- Row 1: Code | Name -->
+          <div class="form-field">
+            <label for="modal-salesmancode" class="field-label">Salesman Code *</label>
+            <input
+              id="modal-salesmancode"
+              type="text"
+              formControlName="salesmancode"
+              (input)="onCodeInput()"
+              class="control-input uppercase"
+              [class.is-invalid]="isFieldInvalid('salesmancode') || !!codeConflictError"
+              [readonly]="isEditMode"
+              placeholder="e.g. SM001"
+              maxlength="20"
+            />
+            <div *ngIf="codeConflictError" class="field-error-text">
+              {{ codeConflictError }}
+            </div>
+            <div *ngIf="isFieldInvalid('salesmancode') && !codeConflictError" class="field-error-text">
+              {{ getErrorMessage('salesmancode') }}
+            </div>
+          </div>
+
+          <div class="form-field">
+            <label for="modal-salesmanname" class="field-label">Salesman Name *</label>
+            <input
+              id="modal-salesmanname"
+              type="text"
+              formControlName="salesmanname"
+              class="control-input"
+              [class.is-invalid]="isFieldInvalid('salesmanname')"
+              placeholder="Enter full name"
+              maxlength="100"
+            />
+            <div *ngIf="isFieldInvalid('salesmanname')" class="field-error-text">
+              {{ getErrorMessage('salesmanname') }}
+            </div>
+          </div>
+
+          <!-- Row 2: Mobile No * | Email * -->
+          <div class="form-field">
+            <label for="modal-mobileno" class="field-label">Mobile No *</label>
+            <input
+              id="modal-mobileno"
+              type="text"
+              formControlName="mobileno"
+              (input)="onMobileInput()"
+              class="control-input"
+              [class.is-invalid]="isFieldInvalid('mobileno') || !!mobileConflictError"
+              placeholder="Digits only, 7 to 15"
+              maxlength="15"
+            />
+            <div *ngIf="mobileConflictError" class="field-error-text">
+              {{ mobileConflictError }}
+            </div>
+            <div *ngIf="isFieldInvalid('mobileno') && !mobileConflictError" class="field-error-text">
+              {{ getErrorMessage('mobileno') }}
+            </div>
+          </div>
+
+          <div class="form-field">
+            <label for="modal-email" class="field-label">Email *</label>
+            <input
+              id="modal-email"
+              type="email"
+              formControlName="email"
+              (input)="onEmailInput()"
+              class="control-input"
+              [class.is-invalid]="isFieldInvalid('email') || !!emailConflictError"
+              placeholder="name@company.com"
+              maxlength="100"
+            />
+            <div *ngIf="emailConflictError" class="field-error-text">
+              {{ emailConflictError }}
+            </div>
+            <div *ngIf="isFieldInvalid('email') && !emailConflictError" class="field-error-text">
+              {{ getErrorMessage('email') }}
+            </div>
+          </div>
+
+          <!-- Row 3: Joining Date * | Status * -->
+          <div class="form-field">
+            <label for="modal-joiningdate" class="field-label">Joining Date *</label>
+            <input
+              id="modal-joiningdate"
+              type="date"
+              formControlName="joiningdate"
+              class="control-input"
+              [class.is-invalid]="isFieldInvalid('joiningdate')"
+              placeholder="dd-MMM-yyyy"
+            />
+            <div *ngIf="isFieldInvalid('joiningdate')" class="field-error-text">
+              {{ getErrorMessage('joiningdate') }}
+            </div>
+            <span *ngIf="!isFieldInvalid('joiningdate')" class="field-hint-text">Cannot be a future date.</span>
+          </div>
+
+          
+        </div>
+      </div>
+
+      <div class="modal-footer-pro">
+        <button type="button" class="btn btn-secondary" (click)="closeEditModal()" [disabled]="savingSalesman">
+          Cancel
+        </button>
+
+        <button
+          *ngIf="!isEditMode"
+          type="button"
+          class="btn btn-secondary"
+          (click)="saveSalesman(true)"
+          [disabled]="savingSalesman"
+        >
+          Save &amp; New
+        </button>
+
+        <button type="submit" class="btn btn-primary" [disabled]="savingSalesman">
+          {{ savingSalesman ? 'Saving...' : (isEditMode ? 'Update Salesman' : 'Save Salesman') }}
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Reusable Delete / Status Confirmation Dialog -->
+<app-confirm-modal
+  [isOpen]="isModalOpen"
+  [title]="modalTitle"
+  [message]="modalMessage"
+  [subMessage]="modalSubMessage"
+  [confirmText]="modalConfirmText"
+  [iconType]="modalIconType"
+  [confirmBtnClass]="modalConfirmBtnClass"
+  [processing]="modalProcessing"
+  (confirmed)="onModalConfirm()"
+  (cancelled)="onModalCancel()"
+></app-confirm-modal>

@@ -1,0 +1,96 @@
+﻿using MarketingApi.Data;
+using MarketingApi.Repository;
+using MarketingApi.Service;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.IdentityModel.Tokens;
+using System.Text;
+using System.Text.Json.Serialization;
+
+var builder = WebApplication.CreateBuilder(args);
+
+// Add Controllers and configure JSON options
+builder.Services.AddControllers()
+    .AddJsonOptions(options =>
+    {
+        // Avoid cyclic reference issues during serialization
+        options.JsonSerializerOptions.ReferenceHandler = ReferenceHandler.IgnoreCycles;
+        options.JsonSerializerOptions.DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull;
+    });
+
+// Configure PostgreSQL Database Context
+builder.Services.AddDbContext<SalesMarketingDbContext>(options =>
+    options.UseNpgsql(
+        builder.Configuration.GetConnectionString("DefaultConnection")));
+
+// Dependency Injection - Register Repositories
+builder.Services.AddScoped<IUsersRepository, UsersRepository>();
+builder.Services.AddScoped<ISalesmanRepository, SalesmanRepository>();
+builder.Services.AddScoped<IMarketingTeamRepository, MarketingTeamRepository>();
+
+
+// Dependency Injection - Register Services
+builder.Services.AddScoped<IUsersService, UsersService>();
+builder.Services.AddScoped<ISalesmanService, SalesmanService>();
+builder.Services.AddScoped<IMarketingTeamService, MarketingTeamService>();
+builder.Services.AddScoped<IJwtTokenService, JwtTokenService>();
+
+var jwtKey = builder.Configuration["Jwt:Key"] ?? "MarketingApi-Development-Key-Please-Change";
+var jwtIssuer = builder.Configuration["Jwt:Issuer"] ?? "MarketingApi";
+var jwtAudience = builder.Configuration["Jwt:Audience"] ?? "MarketingApiClients";
+
+builder.Services.AddAuthentication(options =>
+{
+    options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
+    options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
+})
+.AddJwtBearer(options =>
+{
+    options.TokenValidationParameters = new TokenValidationParameters
+    {
+        ValidateIssuer = true,
+        ValidateAudience = true,
+        ValidateLifetime = true,
+        ValidateIssuerSigningKey = true,
+        ValidIssuer = jwtIssuer,
+        ValidAudience = jwtAudience,
+        IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey)),
+        ClockSkew = TimeSpan.FromMinutes(2)
+    };
+});
+
+builder.Services.AddAuthorization();
+
+// Configure Swagger / OpenAPI
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSwaggerGen();
+
+// Configure CORS so the Angular frontend can access the API
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("AllowAll", policy =>
+    {
+        policy.AllowAnyOrigin()
+              .AllowAnyMethod()
+              .AllowAnyHeader();
+    });
+});
+
+var app = builder.Build();
+
+// Enable Swagger and Swagger UI at /swagger
+app.UseSwagger();
+app.UseSwaggerUI(c =>
+{
+    c.SwaggerEndpoint("/swagger/v1/swagger.json", "Sales & Marketing API v1");
+});
+
+// Redirect root "/" to "/swagger" so both the root URL and /swagger work
+app.MapGet("/", () => Results.Redirect("/swagger"));
+
+// Enable CORS
+app.UseCors("AllowAll");
+
+app.MapControllers();
+
+app.Run();

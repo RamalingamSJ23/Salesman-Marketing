@@ -1,0 +1,176 @@
+﻿using MarketingApi.DTOs.MarketingTeam;
+using MarketingApi.Service;
+using Microsoft.AspNetCore.Mvc;
+
+namespace MarketingApi.Controllers
+{
+    /// <summary>
+    /// API Controller for Marketing Team Master.
+    /// Provides endpoints to list, view, create, edit (with row merge), activate, and deactivate marketing teams.
+    /// Accessible via /api/MarketingTeamMaster.
+    /// </summary>
+    [ApiController]
+    [Route("api/[controller]")]
+    public class MarketingTeamMasterController : ControllerBase
+    {
+        private readonly IMarketingTeamService _marketingTeamService;
+
+        public MarketingTeamMasterController(IMarketingTeamService marketingTeamService)
+        {
+            _marketingTeamService = marketingTeamService;
+        }
+
+        /// <summary>
+        /// Gets a paginated list of marketing teams with team leader name and salesman count.
+        /// GET /api/MarketingTeamMaster?search=mt001&status=1&pageNumber=1&pageSize=10
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetTeams([FromQuery] MarketingTeamQueryParameters parameters)
+        {
+            var result = await _marketingTeamService.GetPagedTeamsAsync(parameters);
+            return Ok(result.Data);
+        }
+
+        /// <summary>
+        /// Gets full marketing team details (header, members grid, and total target amount).
+        /// GET /api/MarketingTeamMaster/{id}
+        /// </summary>
+        [HttpGet("{id:long}")]
+        public async Task<IActionResult> GetById(long id)
+        {
+            var result = await _marketingTeamService.GetByIdAsync(id);
+            if (!result.Success)
+            {
+                return StatusCode(result.StatusCode, new { message = result.ErrorMessage });
+            }
+
+            return Ok(result.Data);
+        }
+
+        /// <summary>
+        /// Returns dropdown options for SalesmanRole enum.
+        /// GET /api/MarketingTeamMaster/role-options
+        /// </summary>
+        [HttpGet("role-options")]
+        public IActionResult GetRoleOptions()
+        {
+            var options = _marketingTeamService.GetRoleOptions();
+            return Ok(options);
+        }
+
+        /// <summary>
+        /// Creates a new marketing team along with all its member rows in a single transaction.
+        /// POST /api/MarketingTeamMaster
+        /// </summary>
+        [HttpPost]
+        public async Task<IActionResult> CreateTeam([FromBody] CreateMarketingTeamDto dto)
+        {
+            if (!ModelState.IsValid)
+            {
+                return BadRequest(ModelState);
+            }
+
+            var result = await _marketingTeamService.CreateTeamAsync(dto);
+            if (!result.Success)
+            {
+                return StatusCode(result.StatusCode, new { message = result.ErrorMessage });
+            }
+
+            return CreatedAtAction(nameof(GetById), new { id = result.Data!.Id }, result.Data);
+        }
+
+        /// <summary>
+        /// Adds one salesman to an existing active marketing team.
+        /// POST /api/MarketingTeamMaster/{id}/salesmen
+        /// </summary>
+        [HttpPost("{id:long}/salesmen")]
+        public async Task<IActionResult> AddSalesman(long id, [FromBody] MarketingTeamDetailInputDto dto)
+        {
+            if (!ModelState.IsValid)
+            {
+                return BadRequest(ModelState);
+            }
+
+            var result = await _marketingTeamService.AddSalesmanToTeamAsync(id, dto);
+            if (!result.Success)
+            {
+                return StatusCode(result.StatusCode, new { message = result.ErrorMessage });
+            }
+
+            return Ok(result.Data);
+        }
+
+        /// <summary>
+        /// Updates a marketing team details and merges its member rows (insert/update/delete) in one transaction.
+        /// Note: Status is NOT changed here. Use /deactivate and /activate endpoints instead.
+        /// Note: Team must be Active to allow editing members.
+        /// PUT /api/MarketingTeamMaster/{id}
+        /// </summary>
+        [HttpPut("{id:long}")]
+        public async Task<IActionResult> UpdateTeam(long id, [FromBody] UpdateMarketingTeamDto dto)
+        {
+            if (!ModelState.IsValid)
+            {
+                return BadRequest(ModelState);
+            }
+
+            var result = await _marketingTeamService.UpdateTeamAsync(id, dto);
+            if (!result.Success)
+            {
+                return StatusCode(result.StatusCode, new { message = result.ErrorMessage });
+            }
+
+            return Ok(result.Data);
+        }
+
+        /// <summary>
+        /// Deactivates a marketing team by ID (sets team status = 2, Inactive).
+        /// Also deactivates ALL member rows in marketingteamdetail for this team.
+        /// PUT /api/MarketingTeamMaster/{id}/deactivate
+        /// </summary>
+        [HttpPut("{id:long}/deactivate")]
+        public async Task<IActionResult> DeactivateTeam(long id)
+        {
+            var result = await _marketingTeamService.DeactivateTeamAsync(id);
+            if (!result.Success)
+            {
+                return StatusCode(result.StatusCode, new { message = result.ErrorMessage });
+            }
+
+            return Ok(new { message = "Marketing team deactivated successfully.", data = result.Data });
+        }
+
+        /// <summary>
+        /// Activates a marketing team by ID (sets team status = 1, Active).
+        /// Member rows keep their own individual status.
+        /// PUT /api/MarketingTeamMaster/{id}/activate
+        /// </summary>
+        [HttpPut("{id:long}/activate")]
+        public async Task<IActionResult> ActivateTeam(long id)
+        {
+            var result = await _marketingTeamService.ActivateTeamAsync(id);
+            if (!result.Success)
+            {
+                return StatusCode(result.StatusCode, new { message = result.ErrorMessage });
+            }
+
+            return Ok(new { message = "Marketing team activated successfully.", data = result.Data });
+        }
+
+        /// <summary>
+        /// Deletes a marketing team and its salesman assignments.
+        /// DELETE /api/MarketingTeamMaster/{id}
+        /// </summary>
+        [HttpDelete("{id:long}")]
+        public async Task<IActionResult> DeleteTeam(long id)
+        {
+            var result = await _marketingTeamService.DeleteTeamAsync(id);
+            if (!result.Success)
+            {
+                return StatusCode(result.StatusCode, new { message = result.ErrorMessage });
+            }
+
+            return NoContent();
+        }
+    }
+}

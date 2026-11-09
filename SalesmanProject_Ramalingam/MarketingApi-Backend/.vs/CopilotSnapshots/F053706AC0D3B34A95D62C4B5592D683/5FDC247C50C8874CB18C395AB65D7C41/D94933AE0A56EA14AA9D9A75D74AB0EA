@@ -1,0 +1,33 @@
+﻿<!-- * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * -->
+<!-- * * * * * * * * * * * The content below * * * * * * * * * * * -->
+<!-- * * * * * * * * * * is only a placeholder * * * * * * * * * * -->
+<!-- * * * * * * * * * * and can be replaced.  * * * * * * * * * * -->
+<!-- * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * -->
+<!-- * * * * * * * * * Delete the template below * * * * * * * * * -->
+<!-- * * * * * * * to get started with your project! * * * * * * * -->
+<!-- * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * -->
+
+<header class="topbar" *ngIf="isAuthenticated()">
+  <div class="brand-wrap">
+    <div class="brand-mark">S&amp;M</div>
+    <div class="brand-text">Sales &amp; Marketing</div>
+  </div>
+
+  <nav aria-label="Main navigation">
+    <a routerLink="/salesman" routerLinkActive="active">Salesman Master</a>
+    <a routerLink="/marketing-team" routerLinkActive="active">Marketing Team Master</a>
+    <button type="button" class="logout-button" (click)="logout()">Logout</button>
+  </nav>
+</header>
+
+<main class="page-container">
+  <router-outlet></router-outlet>
+</main>
+
+<!-- * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * -->
+<!-- * * * * * * * * * * * The content above * * * * * * * * * * * * -->
+<!-- * * * * * * * * * * is only a placeholder * * * * * * * * * * * -->
+<!-- * * * * * * * * * * and can be replaced.  * * * * * * * * * * * -->
+<!-- * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * -->
+<!-- * * * * * * * * * * End of Placeholder  * * * * * * * * * * * * -->
+<!-- * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * -->

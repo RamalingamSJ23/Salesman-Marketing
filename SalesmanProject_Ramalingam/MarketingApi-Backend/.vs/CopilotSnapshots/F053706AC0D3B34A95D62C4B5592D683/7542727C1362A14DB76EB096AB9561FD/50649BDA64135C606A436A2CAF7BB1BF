@@ -1,0 +1,18 @@
+﻿using MarketingApi.Models;
+using MarketingApi.Repository;
+
+namespace MarketingApi.Service
+{
+    public class UsersService : IUsersService
+    {
+        private readonly IUsersRepository _usersRepository;
+        public UsersService(IUsersRepository usersRepository)
+        {
+            _usersRepository = usersRepository;
+        }
+        public async Task<List<Role>> GetRoles()
+        {
+            return await _usersRepository.GetRoles();
+        }
+    }
+}

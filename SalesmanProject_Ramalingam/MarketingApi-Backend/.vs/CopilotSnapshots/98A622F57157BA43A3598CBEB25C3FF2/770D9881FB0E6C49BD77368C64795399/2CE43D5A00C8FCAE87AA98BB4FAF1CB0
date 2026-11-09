@@ -1,0 +1,163 @@
+﻿import { CommonModule } from '@angular/common';
+import { Component, OnInit, inject } from '@angular/core';
+import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
+import { ActivatedRoute, Router, RouterLink } from '@angular/router';
+import { forkJoin } from 'rxjs';
+import { MarketingTeamApiService } from '../../services/marketing-team-api.service';
+import { SalesmanApiService } from '../../services/salesman-api.service';
+import { RecordStatus, SalesmanLookup, SalesmanRole, SelectOption, Team, TeamMember } from '../../shared/models';
+
+@Component({
+  selector: 'app-team-form',
+  standalone: true,
+  imports: [CommonModule, ReactiveFormsModule, FormsModule, RouterLink],
+  templateUrl: './team-form.component.html',
+})
+export class TeamFormComponent implements OnInit {
+  private readonly fb = inject(FormBuilder);
+  private readonly teams = inject(MarketingTeamApiService);
+  private readonly salesmen = inject(SalesmanApiService);
+  private readonly route = inject(ActivatedRoute);
+  private readonly router = inject(Router);
+
+  readonly form = this.fb.nonNullable.group({
+    teamcode: ['', [Validators.required, Validators.maxLength(20)]],
+    teamname: ['', [Validators.required, Validators.maxLength(100)]],
+    teamleaderid: [0, [Validators.required, Validators.min(1)]],
+    description: ['', Validators.maxLength(500)],
+    status: [RecordStatus.Active, Validators.required],
+  });
+
+  id: number | null = null;
+  members: TeamMember[] = [];
+  activeSalesmen: SalesmanLookup[] = [];
+  roleOptions: SelectOption[] = [];
+  errorMessage = '';
+  saving = false;
+  loading = true;
+
+  get editMode(): boolean { return this.id !== null; }
+  get totalTarget(): number { return this.members.reduce((total, member) => total + Number(member.targetamount || 0), 0); }
+
+  ngOnInit(): void {
+    const id = Number(this.route.snapshot.paramMap.get('id'));
+    this.id = id || null;
+
+    const dataRequest = [this.salesmen.getActiveLookup(), this.teams.getRoleOptions()];
+    if (this.id) {
+      forkJoin({ salesmen: dataRequest[0], roles: dataRequest[1], team: this.teams.getById(this.id) }).subscribe({
+        next: ({ salesmen, roles, team }) => this.loadData(salesmen, roles, team),
+        error: (error) => this.finishWithError(error),
+      });
+    } else {
+      forkJoin({ salesmen: dataRequest[0], roles: dataRequest[1] }).subscribe({
+        next: ({ salesmen, roles }) => this.loadData(salesmen, roles),
+        error: (error) => this.finishWithError(error),
+      });
+    }
+  }
+
+  loadData(salesmen: SalesmanLookup[], roles: SelectOption[], team?: Team): void {
+    this.activeSalesmen = salesmen;
+    this.roleOptions = roles;
+    if (team) {
+      this.form.patchValue({ teamcode: team.teamcode, teamname: team.teamname, teamleaderid: team.teamleaderid, description: team.description || '', status: team.status });
+      this.members = team.members.map((member) => ({ ...member }));
+    }
+    this.loading = false;
+  }
+
+  onLeaderChanged(): void {
+    const leaderId = this.form.controls.teamleaderid.value;
+    if (!leaderId) return;
+
+    const oldLeader = this.members.find((member) => member.role === SalesmanRole.TeamLeader);
+    if (oldLeader && oldLeader.salesmanid !== leaderId) {
+      this.members = this.members.filter((member) => member !== oldLeader);
+    }
+
+    const selected = this.members.find((member) => member.salesmanid === leaderId);
+    if (selected) {
+      selected.role = SalesmanRole.TeamLeader;
+    } else {
+      this.members.unshift({ salesmanid: leaderId, role: SalesmanRole.TeamLeader, targetamount: 0, status: RecordStatus.Active });
+    }
+  }
+
+  addMember(): void {
+    const available = this.activeSalesmen.find((salesman) => !this.members.some((member) => member.salesmanid === salesman.id));
+    if (!available) {
+      this.errorMessage = 'All active salesmen are already in this team.';
+      return;
+    }
+    this.members.push({ salesmanid: available.id, role: SalesmanRole.SalesExecutive, targetamount: 0, status: RecordStatus.Active });
+    this.errorMessage = '';
+  }
+
+  removeMember(index: number): void {
+    if (this.members[index].role === SalesmanRole.TeamLeader) {
+      this.errorMessage = 'Select another Team Leader before removing this row.';
+      return;
+    }
+    this.members.splice(index, 1);
+  }
+
+  availableSalesmen(current: TeamMember): SalesmanLookup[] {
+    return this.activeSalesmen.filter((salesman) =>
+      salesman.id === current.salesmanid || !this.members.some((member) => member !== current && member.salesmanid === salesman.id));
+  }
+
+  salesmanName(id: number): string {
+    return this.activeSalesmen.find((salesman) => salesman.id === id)?.salesmanname || 'Unknown salesman';
+  }
+
+  save(): void {
+    this.errorMessage = '';
+    if (this.form.invalid) {
+      this.form.markAllAsTouched();
+      return;
+    }
+
+    const leaderId = this.form.controls.teamleaderid.value;
+    const leaders = this.members.filter((member) => member.role === SalesmanRole.TeamLeader);
+    if (this.members.length === 0) {
+      this.errorMessage = 'Add at least one salesman to the team.';
+      return;
+    }
+    if (leaders.length !== 1 || leaders[0].salesmanid !== leaderId) {
+      this.errorMessage = 'The Team Leader must be the only member with Team Leader role.';
+      return;
+    }
+
+    this.saving = true;
+    const value = this.form.getRawValue();
+    const request = {
+      teamcode: this.editMode ? undefined : value.teamcode,
+      teamname: value.teamname,
+      teamleaderid: value.teamleaderid,
+      description: value.description || undefined,
+      status: value.status,
+      members: this.members.map((member) => ({ ...member, targetamount: Number(member.targetamount) })),
+    };
+
+    const saveRequest = this.editMode ? this.teams.update(this.id!, request) : this.teams.create(request);
+    saveRequest.subscribe({
+      next: () => this.router.navigate(['/marketing-team']),
+      error: (error) => { this.saving = false; this.errorMessage = this.readError(error); },
+    });
+  }
+
+  isInvalid(name: string): boolean {
+    const control = this.form.get(name);
+    return !!control && control.invalid && control.touched;
+  }
+
+  private finishWithError(error: any): void {
+    this.loading = false;
+    this.errorMessage = this.readError(error);
+  }
+
+  private readError(error: any): string {
+    return error?.error?.message || 'The request could not be completed.';
+  }
+}

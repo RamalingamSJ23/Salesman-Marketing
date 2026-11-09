@@ -1,0 +1,32 @@
+﻿using MarketingApi.Service;
+using Microsoft.AspNetCore.Mvc;
+
+namespace MarketingApi.Controllers
+{
+    /// <summary>
+    /// API Controller for Users and Roles.
+    /// Accessible via /api/users and /api/Users.
+    /// </summary>
+    [ApiController]
+    [Route("api/[controller]")]
+    public class UsersController : ControllerBase
+    {
+        private readonly IUsersService _usersService;
+
+        public UsersController(IUsersService usersService)
+        {
+            _usersService = usersService;
+        }
+
+        /// <summary>
+        /// Returns all system user roles.
+        /// GET /api/users/roles
+        /// </summary>
+        [HttpGet("roles")]
+        public async Task<IActionResult> GetRoles()
+        {
+            var roles = await _usersService.GetRoles();
+            return Ok(roles);
+        }
+    }
+}

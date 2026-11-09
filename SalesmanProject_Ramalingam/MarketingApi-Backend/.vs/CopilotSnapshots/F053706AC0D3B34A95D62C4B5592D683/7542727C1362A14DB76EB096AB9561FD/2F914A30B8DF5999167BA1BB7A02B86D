@@ -1,0 +1,34 @@
+﻿import { Routes } from '@angular/router';
+
+export const routes: Routes = [
+  { path: '', pathMatch: 'full', redirectTo: 'salesman' },
+  {
+    path: 'salesman',
+    loadComponent: () => import('./pages/salesman-list/salesman-list.component').then((m) => m.SalesmanListComponent),
+  },
+  {
+    path: 'salesman/new',
+    loadComponent: () => import('./pages/salesman-form/salesman-form.component').then((m) => m.SalesmanFormComponent),
+  },
+  {
+    path: 'salesman/:id/edit',
+    loadComponent: () => import('./pages/salesman-form/salesman-form.component').then((m) => m.SalesmanFormComponent),
+  },
+  {
+    path: 'marketing-team',
+    loadComponent: () => import('./pages/team-list/team-list.component').then((m) => m.TeamListComponent),
+  },
+  {
+    path: 'marketing-team/new',
+    loadComponent: () => import('./pages/team-form/team-form.component').then((m) => m.TeamFormComponent),
+  },
+  {
+    path: 'marketing-team/:id/edit',
+    loadComponent: () => import('./pages/team-form/team-form.component').then((m) => m.TeamFormComponent),
+  },
+  {
+    path: 'marketing-team/:id',
+    loadComponent: () => import('./pages/team-view/team-view.component').then((m) => m.TeamViewComponent),
+  },
+  { path: '**', redirectTo: 'salesman' },
+];

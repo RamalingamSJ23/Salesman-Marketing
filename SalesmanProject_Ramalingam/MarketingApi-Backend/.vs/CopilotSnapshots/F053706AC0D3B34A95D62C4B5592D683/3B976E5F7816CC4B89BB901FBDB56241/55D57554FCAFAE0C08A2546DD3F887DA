@@ -1,0 +1,175 @@
+﻿using MarketingApi.Data;
+using MarketingApi.DTOs.Common;
+using MarketingApi.DTOs.Salesman;
+using MarketingApi.Models;
+using Microsoft.EntityFrameworkCore;
+
+namespace MarketingApi.Repository
+{
+    /// <summary>
+    /// Repository implementation for Salesman database operations using EF Core.
+    /// </summary>
+    public class SalesmanRepository : ISalesmanRepository
+    {
+        private readonly SalesMarketingDbContext _dbContext;
+
+        public SalesmanRepository(SalesMarketingDbContext dbContext)
+        {
+            _dbContext = dbContext;
+        }
+
+        /// <summary>
+        /// Retrieves a paginated list of salesmen with optional search and status filter.
+        /// </summary>
+        public async Task<PagedResultDto<SalesmanListDto>> GetPagedSalesmenAsync(SalesmanQueryParameters parameters)
+        {
+            var query = _dbContext.Salesmen.AsNoTracking().AsQueryable();
+
+            // Search filter by code, name, or mobile
+            if (!string.IsNullOrWhiteSpace(parameters.Search))
+            {
+                var term = parameters.Search.Trim().ToLower();
+                query = query.Where(s =>
+                    s.Salesmancode.ToLower().Contains(term) ||
+                    s.Salesmanname.ToLower().Contains(term) ||
+                    (s.Mobileno != null && s.Mobileno.ToLower().Contains(term)));
+            }
+
+            // Status filter (1 = Active, 2 = Inactive, null = All)
+            if (parameters.Status.HasValue)
+            {
+                query = query.Where(s => s.Status == parameters.Status.Value);
+            }
+
+            var totalCount = await query.CountAsync();
+
+            var items = await query
+                .OrderBy(s => s.Salesmancode)
+                .Skip((parameters.PageNumber - 1) * parameters.PageSize)
+                .Take(parameters.PageSize)
+                .Select(s => new SalesmanListDto
+                {
+                    Id = s.Id,
+                    Salesmancode = s.Salesmancode,
+                    Salesmanname = s.Salesmanname,
+                    Mobileno = s.Mobileno,
+                    Email = s.Email,
+                    Joiningdate = s.Joiningdate,
+                    Status = s.Status,
+                    Createddate = s.Createddate,
+                    Modifieddate = s.Modifieddate
+                })
+                .ToListAsync();
+
+            return new PagedResultDto<SalesmanListDto>
+            {
+                Items = items,
+                TotalCount = totalCount,
+                PageNumber = parameters.PageNumber,
+                PageSize = parameters.PageSize
+            };
+        }
+
+        /// <summary>
+        /// Gets a salesman by ID.
+        /// </summary>
+        public async Task<Salesman?> GetByIdAsync(long id)
+        {
+            return await _dbContext.Salesmen
+                .AsNoTracking()
+                .FirstOrDefaultAsync(s => s.Id == id);
+        }
+
+        /// <summary>
+        /// Gets a salesman by unique code.
+        /// </summary>
+        public async Task<Salesman?> GetByCodeAsync(string code)
+        {
+            var cleanCode = code.Trim().ToUpper();
+            return await _dbContext.Salesmen
+                .AsNoTracking()
+                .FirstOrDefaultAsync(s => s.Salesmancode.ToUpper() == cleanCode);
+        }
+
+        /// <summary>
+        /// Checks whether a salesman code already exists (optionally excluding a given ID when updating).
+        /// </summary>
+        public async Task<bool> CodeExistsAsync(string code, long? excludeId = null)
+        {
+            var cleanCode = code.Trim().ToUpper();
+            return await _dbContext.Salesmen
+                .AnyAsync(s => s.Salesmancode.ToUpper() == cleanCode && (!excludeId.HasValue || s.Id != excludeId.Value));
+        }
+
+        /// <summary>
+        /// Returns active salesmen (Status = 1) for dropdowns.
+        /// </summary>
+        public async Task<List<SalesmanLookupDto>> GetActiveSalesmenLookupAsync()
+        {
+            return await _dbContext.Salesmen
+                .AsNoTracking()
+                .Where(s => s.Status == 1) // 1 = Active
+                .OrderBy(s => s.Salesmanname)
+                .Select(s => new SalesmanLookupDto
+                {
+                    Id = s.Id,
+                    Salesmancode = s.Salesmancode,
+                    Salesmanname = s.Salesmanname,
+                    Status = s.Status
+                })
+                .ToListAsync();
+        }
+
+        /// <summary>
+        /// Inserts a new salesman record.
+        /// </summary>
+        public async Task<Salesman> CreateAsync(Salesman salesman)
+        {
+            _dbContext.Salesmen.Add(salesman);
+            await _dbContext.SaveChangesAsync();
+            return salesman;
+        }
+
+        /// <summary>
+        /// Updates an existing salesman record.
+        /// </summary>
+        public async Task UpdateAsync(Salesman salesman)
+        {
+            _dbContext.Salesmen.Update(salesman);
+            await _dbContext.SaveChangesAsync();
+        }
+
+        /// <summary>
+        /// Deletes a salesman record.
+        /// </summary>
+        public async Task DeleteAsync(Salesman salesman)
+        {
+            _dbContext.Salesmen.Remove(salesman);
+            await _dbContext.SaveChangesAsync();
+        }
+
+        /// <summary>
+        /// Checks if a salesman is assigned to any team (as team leader or team detail row).
+        /// Used for Rule R2: Salesman cannot be deleted if assigned to a team.
+        /// </summary>
+        public async Task<bool> IsAssignedToAnyTeamAsync(long salesmanId)
+        {
+            var isLeader = await _dbContext.Marketingteams.AnyAsync(t => t.Teamleaderid == salesmanId);
+            if (isLeader) return true;
+
+            var isDetailMember = await _dbContext.Marketingteamdetails.AnyAsync(d => d.Salesmanid == salesmanId);
+            return isDetailMember;
+        }
+
+        /// <summary>
+        /// Gets a list of salesmen by their IDs (used for validation).
+        /// </summary>
+        public async Task<List<Salesman>> GetSalesmenByIdsAsync(IEnumerable<long> ids)
+        {
+            return await _dbContext.Salesmen
+                .AsNoTracking()
+                .Where(s => ids.Contains(s.Id))
+                .ToListAsync();
+        }
+    }
+}

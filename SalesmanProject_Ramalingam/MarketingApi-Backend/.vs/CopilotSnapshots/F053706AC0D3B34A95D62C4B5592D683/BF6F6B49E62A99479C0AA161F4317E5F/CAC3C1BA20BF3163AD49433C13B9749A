@@ -1,0 +1,32 @@
+﻿import { Component, inject, OnInit } from '@angular/core';
+import { Router, RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
+import { CommonModule } from '@angular/common';
+import { AuthService } from './services/auth.service';
+
+@Component({
+  imports: [CommonModule, RouterOutlet, RouterLink, RouterLinkActive],
+  selector: 'app-root',
+  styleUrl: './app.css',
+  templateUrl: './app.html',
+})
+export class App implements OnInit {
+  private readonly auth = inject(AuthService);
+  private readonly router = inject(Router);
+
+  ngOnInit(): void {
+    if (this.auth.isAuthenticated()) {
+      this.router.navigateByUrl('/salesman');
+    } else {
+      this.router.navigateByUrl('/login');
+    }
+  }
+
+  isAuthenticated(): boolean {
+    return this.auth.isAuthenticated();
+  }
+
+  logout(): void {
+    this.auth.logout();
+    this.router.navigateByUrl('/login');
+  }
+}

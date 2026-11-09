@@ -1,0 +1,138 @@
+﻿using MarketingApi.DTOs.Salesman;
+using MarketingApi.Service;
+using Microsoft.AspNetCore.Mvc;
+
+namespace MarketingApi.Controllers
+{
+    /// <summary>
+    /// API Controller for Salesman Master.
+    /// Provides endpoints to list, view, create, edit details, deactivate, activate, and delete salesmen.
+    /// Accessible via /api/SalesmanMaster and /api/salesman.
+    /// </summary>
+    [ApiController]
+ 
+    [Route("api/salesman")]
+    public class SalesmanMasterController : ControllerBase
+    {
+        private readonly ISalesmanService _salesmanService;
+
+        public SalesmanMasterController(ISalesmanService salesmanService)
+        {
+            _salesmanService = salesmanService;
+        }
+
+        /// <summary>
+        /// Gets a paginated list of salesmen with search and status filtering.
+        /// GET /api/SalesmanMaster?search=john&status=1&pageNumber=1&pageSize=10
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetSalesmen([FromQuery] SalesmanQueryParameters parameters)
+        {
+            var result = await _salesmanService.GetPagedSalesmenAsync(parameters);
+            return Ok(result.Data);
+        }
+
+        /// <summary>
+        /// Gets a single salesman by ID.
+        /// GET /api/SalesmanMaster/{id}
+        /// </summary>
+        [HttpGet("{id:long}")]
+        public async Task<IActionResult> GetById(long id)
+        {
+            var result = await _salesmanService.GetByIdAsync(id);
+            if (!result.Success)
+            {
+                return StatusCode(result.StatusCode, new { message = result.ErrorMessage });
+            }
+
+            return Ok(result.Data);
+        }
+
+        /// <summary>
+        /// Returns a list of all active salesmen for dropdown controls in Marketing Team forms.
+        /// GET /api/SalesmanMaster/lookup
+        /// </summary>
+        [HttpGet("lookup")]
+        public async Task<IActionResult> GetLookup()
+        {
+            var result = await _salesmanService.GetActiveSalesmenLookupAsync();
+            return Ok(result.Data);
+        }
+
+        /// <summary>
+        /// Creates a new salesman record.
+        /// POST /api/SalesmanMaster
+        /// </summary>
+        [HttpPost]
+        public async Task<IActionResult> CreateSalesman([FromBody] CreateSalesmanDto dto)
+        {
+            if (!ModelState.IsValid)
+            {
+                return BadRequest(ModelState);
+            }
+
+            var result = await _salesmanService.CreateSalesmanAsync(dto);
+            if (!result.Success)
+            {
+                return StatusCode(result.StatusCode, new { message = result.ErrorMessage });
+            }
+
+            return CreatedAtAction(nameof(GetById), new { id = result.Data!.Id }, result.Data);
+        }
+
+        /// <summary>
+        /// Updates an existing salesman details (Name, Mobile, Email, Joining Date).
+        /// Note: Status is NOT edited here; use the dedicated /deactivate and /activate endpoints.
+        /// PUT /api/SalesmanMaster/{id}
+        /// </summary>
+        [HttpPut("{id:long}")]
+        public async Task<IActionResult> UpdateSalesman(long id, [FromBody] UpdateSalesmanDto dto)
+        {
+            if (!ModelState.IsValid)
+            {
+                return BadRequest(ModelState);
+            }
+
+            var result = await _salesmanService.UpdateSalesmanAsync(id, dto);
+            if (!result.Success)
+            {
+                return StatusCode(result.StatusCode, new { message = result.ErrorMessage });
+            }
+
+            return Ok(result.Data);
+        }
+
+        /// <summary>
+        /// Deactivates a salesman by ID (sets status = 2, Inactive).
+        /// PUT /api/SalesmanMaster/{id}/deactivate
+        /// </summary>
+        [HttpPut("{id:long}/deactivate")]
+        
+        public async Task<IActionResult> DeactivateSalesman(long id)
+        {
+            var result = await _salesmanService.DeactivateSalesmanAsync(id);
+            if (!result.Success)
+            {
+                return StatusCode(result.StatusCode, new { message = result.ErrorMessage });
+            }
+
+            return Ok(new { message = "Salesman deactivated successfully.", data = result.Data });
+        }
+
+        /// <summary>
+        /// Activates a salesman by ID (sets status = 1, Active).
+        /// PUT /api/SalesmanMaster/{id}/activate
+        /// </summary>
+        [HttpPut("{id:long}/activate")]
+        public async Task<IActionResult> ActivateSalesman(long id)
+        {
+            var result = await _salesmanService.ActivateSalesmanAsync(id);
+            if (!result.Success)
+            {
+                return StatusCode(result.StatusCode, new { message = result.ErrorMessage });
+            }
+
+            return Ok(new { message = "Salesman activated successfully.", data = result.Data });
+        }
+    }
+}

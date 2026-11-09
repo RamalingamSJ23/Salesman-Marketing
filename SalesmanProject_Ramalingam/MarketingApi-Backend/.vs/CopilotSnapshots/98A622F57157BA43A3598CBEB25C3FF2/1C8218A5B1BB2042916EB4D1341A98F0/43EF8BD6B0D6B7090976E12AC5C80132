@@ -1,0 +1,28 @@
+﻿import { CommonModule } from '@angular/common';
+import { Component, OnInit, inject } from '@angular/core';
+import { ActivatedRoute, RouterLink } from '@angular/router';
+import { MarketingTeamApiService } from '../../services/marketing-team-api.service';
+import { Team } from '../../shared/models';
+
+@Component({
+  selector: 'app-team-view',
+  standalone: true,
+  imports: [CommonModule, RouterLink],
+  templateUrl: './team-view.component.html',
+})
+export class TeamViewComponent implements OnInit {
+  private readonly api = inject(MarketingTeamApiService);
+  private readonly route = inject(ActivatedRoute);
+
+  team: Team | null = null;
+  errorMessage = '';
+  loading = true;
+
+  ngOnInit(): void {
+    const id = Number(this.route.snapshot.paramMap.get('id'));
+    this.api.getById(id).subscribe({
+      next: (team) => { this.team = team; this.loading = false; },
+      error: (error) => { this.errorMessage = error?.error?.message || 'The team could not be loaded.'; this.loading = false; },
+    });
+  }
+}

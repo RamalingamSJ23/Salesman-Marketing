@@ -1,0 +1,97 @@
+﻿export enum RecordStatus {
+  Active = 1,
+  Inactive = 2,
+}
+
+export enum SalesmanRole {
+  TeamLeader = 1,
+  SeniorSalesExecutive = 2,
+  SalesExecutive = 3,
+  Trainee = 4,
+}
+
+export interface PagedResult<T> {
+  items: T[];
+  totalCount: number;
+  pageNumber: number;
+  pageSize: number;
+  totalPages: number;
+}
+
+export interface Salesman {
+  id: number;
+  salesmancode: string;
+  salesmanname: string;
+  mobileno?: string;
+  email?: string;
+  joiningdate?: string;
+  status: number;
+  statusName?: string;
+}
+
+export interface SalesmanLookup {
+  id: number;
+  salesmancode: string;
+  salesmanname: string;
+  status: number;
+}
+
+export interface SalesmanRequest {
+  salesmancode: string;
+  salesmanname: string;
+  mobileno?: string;
+  email?: string;
+  joiningdate?: string;
+  status: number;
+}
+
+export interface TeamMember {
+  id?: number;
+  salesmanid: number;
+  salesmancode?: string;
+  salesmanname?: string;
+  role: number;
+  roleName?: string;
+  targetamount: number;
+  status: number;
+}
+
+export interface Team {
+  id: number;
+  teamcode: string;
+  teamname: string;
+  teamleaderid: number;
+  teamleadername: string;
+  description?: string;
+  status: number;
+  statusName?: string;
+  createddate?: string;
+  modifieddate?: string;
+  members: TeamMember[];
+  totalTargetAmount?: number;
+}
+
+export interface TeamListItem {
+  id: number;
+  teamcode: string;
+  teamname: string;
+  teamleadername: string;
+  salesmancount: number;
+  status: number;
+  statusName?: string;
+}
+
+export interface TeamRequest {
+  teamcode?: string;
+  teamname: string;
+  teamleaderid: number;
+  description?: string;
+  status?: number;
+  members: TeamMember[];
+}
+
+export interface SelectOption {
+  value: number;
+  name: string;
+  displayText: string;
+}

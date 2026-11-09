@@ -1,0 +1,47 @@
+﻿<section class="page-card form-card">
+  <div class="page-heading">
+    <div>
+      <h1>{{ editMode ? 'Edit Salesman' : 'New Salesman' }}</h1>
+      <p>Enter the salesman master details.</p>
+    </div>
+    <a class="button" routerLink="/salesman">Back to list</a>
+  </div>
+
+  <p class="error" *ngIf="errorMessage">{{ errorMessage }}</p>
+
+  <form [formGroup]="form" (ngSubmit)="save()" novalidate>
+    <div class="form-grid">
+      <label>Salesman Code *
+        <input formControlName="salesmancode" [readonly]="editMode" />
+        <small class="field-error" *ngIf="isInvalid('salesmancode')">Use 1–20 letters or numbers.</small>
+      </label>
+      <label>Salesman Name *
+        <input formControlName="salesmanname" />
+        <small class="field-error" *ngIf="isInvalid('salesmanname')">Salesman name is required.</small>
+      </label>
+      <label>Mobile No
+        <input formControlName="mobileno" inputmode="numeric" />
+        <small class="field-error" *ngIf="isInvalid('mobileno')">Use 7–15 digits.</small>
+      </label>
+      <label>Email
+        <input formControlName="email" type="email" />
+        <small class="field-error" *ngIf="isInvalid('email')">Enter a valid email address.</small>
+      </label>
+      <label>Joining Date
+        <input formControlName="joiningdate" type="date" [max]="'9999-12-31'" />
+      </label>
+      <label>Status *
+        <select formControlName="status">
+          <option [ngValue]="1">Active</option>
+          <option [ngValue]="2">Inactive</option>
+        </select>
+      </label>
+    </div>
+
+    <div class="form-actions">
+      <button class="button primary" type="submit" [disabled]="saving">{{ saving ? 'Saving...' : 'Save' }}</button>
+      <button class="button" type="button" (click)="save(true)" [disabled]="saving" *ngIf="!editMode">Save &amp; New</button>
+      <a class="button" routerLink="/salesman">Cancel</a>
+    </div>
+  </form>
+</section>

@@ -1,0 +1,275 @@
+<div class="page-container max-w-5xl">
+  <!-- Top Header matching Wireframe Page 10 -->
+  <div class="wireframe-header">
+    <div class="wireframe-title-wrap">
+      <h1 class="wireframe-title">{{ editMode ? 'Edit Marketing Team' : 'New Marketing Team' }}</h1>
+    </div>
+    <div class="wireframe-breadcrumb">
+      <span>Masters</span>
+      <span class="sep">/</span>
+      <a routerLink="/marketing-team">Marketing Team</a>
+      <span class="sep">/</span>
+      <span class="current">{{ editMode ? 'Edit' : 'New' }}</span>
+    </div>
+  </div>
+
+  <!-- Loading State -->
+  <div *ngIf="loading" class="content-card text-center py-8">
+    <span class="spinner-sm"></span> Loading team details and salesmen...
+  </div>
+
+  <!-- General Error Banner -->
+  <div *ngIf="generalError && !loading" class="alert-box alert-error mb-4">
+    {{ generalError }}
+  </div>
+
+  <div *ngIf="!loading">
+    <form [formGroup]="form" (ngSubmit)="save()" novalidate>
+      <!-- Section 1: Team Details (Header section) matching Wireframe Page 10 -->
+      <div class="content-card p-6 mb-6">
+        <h2 class="section-heading mb-4">Team Details</h2>
+
+        <div class="grid grid-3 gap-4">
+          <!-- Team Code * -->
+          <div class="form-field">
+            <label for="teamcode" class="field-label">Team Code *</label>
+            <input
+              id="teamcode"
+              type="text"
+              formControlName="teamcode"
+              (input)="onCodeInput()"
+              class="control-input uppercase"
+              [class.is-invalid]="isInvalid('teamcode') || !!codeConflictError"
+              [readonly]="editMode"
+              placeholder="e.g. MT001"
+              maxlength="20"
+            />
+            <div *ngIf="codeConflictError" class="field-error-text">
+              {{ codeConflictError }}
+            </div>
+            <div *ngIf="isInvalid('teamcode') && !codeConflictError" class="field-error-text">
+              {{ getErrorMessage('teamcode') }}
+            </div>
+          </div>
+
+          <!-- Team Name * -->
+          <div class="form-field">
+            <label for="teamname" class="field-label">Team Name *</label>
+            <input
+              id="teamname"
+              type="text"
+              formControlName="teamname"
+              class="control-input"
+              [class.is-invalid]="isInvalid('teamname')"
+              placeholder="North Region Team"
+              maxlength="100"
+            />
+            <div *ngIf="isInvalid('teamname')" class="field-error-text">
+              {{ getErrorMessage('teamname') }}
+            </div>
+          </div>
+
+          <!-- Status * -->
+          <div class="form-field" *ngIf="editMode">
+            <label for="statusSelect" class="field-label">Status *</label>
+            <select id="statusSelect" formControlName="status" class="control-select w-full">
+              <option [ngValue]="1">Active</option>
+              <option [ngValue]="2">Inactive</option>
+            </select>
+            <div *ngIf="isInvalid('status')" class="field-error-text">
+              {{ getErrorMessage('status') }}
+            </div>
+          </div>
+        </div>
+
+        <div class="grid grid-2 gap-4 mt-4">
+          <!-- Team Leader * -->
+          <div class="form-field">
+            <label for="teamleaderid" class="field-label">Team Leader *</label>
+            <ejs-dropdownlist
+              id="teamleaderid"
+              formControlName="teamleaderid"
+              [dataSource]="eligibleLeaders"
+              [fields]="{ text: 'displayText', value: 'id' }"
+              [allowFiltering]="true"
+              [filterType]="'Contains'"
+              [filterBarPlaceholder]="'Search eligible leader by name or code...'"
+              placeholder="Select Team Leader..."
+              (change)="onLeaderChanged($event)"
+              cssClass="control-dropdown"
+              [class.is-invalid]="isInvalid('teamleaderid')"
+            >
+            </ejs-dropdownlist>
+            <div *ngIf="isInvalid('teamleaderid')" class="field-error-text">
+              {{ getErrorMessage('teamleaderid') }}
+            </div>
+          </div>
+
+          <!-- Description * -->
+          <div class="form-field">
+            <label for="description" class="field-label">Description *</label>
+            <input
+              id="description"
+              type="text"
+              formControlName="description"
+              class="control-input"
+              [class.is-invalid]="isInvalid('description')"
+              placeholder="Covers Dubai north branches"
+              maxlength="500"
+            />
+            <div *ngIf="isInvalid('description')" class="field-error-text">
+              {{ getErrorMessage('description') }}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Section 2: Team Members (Grid section) matching Wireframe Page 10 -->
+      <div class="content-card p-6">
+        <div class="flex items-center justify-between mb-3">
+          <div class="flex items-center gap-3">
+            <h2 class="section-heading">Team Members</h2>
+            <button type="button" class="btn btn-secondary btn-sm" (click)="addMember()">
+              + Add
+            </button>
+          </div>
+
+          <div class="text-xs text-muted italic">
+            Leader row is added automatically from the header
+          </div>
+        </div>
+
+        <!-- Members Grid Table -->
+        <div class="table-container">
+          <table class="grid-table">
+            <thead>
+              <tr>
+                <th style="width: 45px;">#</th>
+                <th style="width: 140px;">Salesman Code</th>
+                <th style="min-width: 220px;">Salesman *</th>
+                <th style="min-width: 180px;">Role *</th>
+                <th style="width: 160px;" class="text-right">Target Amount *</th>
+                <th style="width: 120px;">Status</th>
+                <th style="width: 60px;" class="text-right"></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr *ngFor="let member of members; let i = index" class="table-row">
+                <!-- # -->
+                <td class="font-mono text-muted text-xs">{{ i + 1 }}</td>
+
+                <!-- Salesman Code (Read-only, auto-filled) -->
+                <td class="font-mono font-medium text-slate-700">
+                  {{ member.salesmancode || 'auto' }}
+                </td>
+
+                <!-- Salesman * Dropdown -->
+                <td>
+                  <ejs-dropdownlist
+                    [dataSource]="availableSalesmen(member)"
+                    [fields]="{ text: 'displayText', value: 'id' }"
+                    [value]="member.salesmanid || null"
+                    [allowFiltering]="true"
+                    [filterType]="'Contains'"
+                    [filterBarPlaceholder]="'Search salesman by name or code...'"
+                    placeholder="Select Salesman..."
+                    (change)="onMemberSalesmanChange(member, $event)"
+                    cssClass="control-dropdown"
+                  >
+                  </ejs-dropdownlist>
+                </td>
+
+                <!-- Role * Dropdown -->
+                <td>
+                  <select
+                    class="control-select w-full"
+                    [ngModel]="member.role || 0"
+                    (ngModelChange)="onMemberRoleChange(member, $event)"
+                    [ngModelOptions]="{ standalone: true }"
+                    [disabled]="member.role === 1"
+                  >
+                    <option [ngValue]="0" disabled>Select Position...</option>
+                    <option *ngFor="let role of (member.role === 1 ? roleOptions : memberRoleOptions)" [ngValue]="role.value">
+                      {{ role.displayText }}
+                    </option>
+                  </select>
+                </td>
+
+                <!-- Target Amount * -->
+                <td>
+                  <input
+                    type="number"
+                    min="0"
+                    max="999999999.99"
+                    step="0.01"
+                    class="control-input text-right font-mono"
+                    [class.is-invalid]="member.targetamount < 0 || member.targetamount > 999999999.99"
+                    [(ngModel)]="member.targetamount"
+                    [ngModelOptions]="{ standalone: true }"
+                    placeholder="0.00"
+                  />
+                </td>
+
+                <!-- Status -->
+                <td>
+                  <span class="badge" [class.badge-active]="member.status === 1" [class.badge-inactive]="member.status === 2">
+                    {{ member.status === 1 ? 'Active' : 'Inactive' }}
+                  </span>
+                </td>
+
+                <!-- Action: Remove -->
+                <td class="text-right">
+                  <button
+                    *ngIf="member.role !== 1"
+                    type="button"
+                    class="action-link link-del"
+                    (click)="removeMember(i)"
+                    title="Remove member"
+                  >
+                    Del
+                  </button>
+                  <span *ngIf="member.role === 1" class="text-xs text-muted" title="Leader row is managed via header">
+                    Leader
+                  </span>
+                </td>
+              </tr>
+
+              <tr *ngIf="members.length === 0">
+                <td colspan="7" class="empty-cell">
+                  Select a Team Leader in the header above to initialize the team members grid.
+                </td>
+              </tr>
+            </tbody>
+            <tfoot>
+              <!-- Footer showing Total Target matching Wireframe Page 10 -->
+              <tr class="grid-total-row">
+                <td colspan="4" class="text-right font-bold text-slate-700">Total target</td>
+                <td class="text-right font-bold font-mono text-slate-900">
+                  {{ totalTarget | number: '1.2-2' }}
+                </td>
+                <td colspan="2"></td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+
+        <!-- Action Buttons matching Wireframe: [Save] [Cancel] -->
+        <div class="wireframe-form-actions mt-6">
+          <div class="flex items-center gap-3">
+            <button type="submit" class="btn btn-primary" [disabled]="saving">
+              {{ saving ? 'Saving...' : 'Save' }}
+            </button>
+
+            <a routerLink="/marketing-team" class="btn btn-secondary">
+              Cancel
+            </a>
+          </div>
+
+          <div class="text-xs text-muted">
+            * required
+          </div>
+        </div>
+      </div>
+    </form>
+  </div>
+</div>

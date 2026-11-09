@@ -1,0 +1,29 @@
+﻿using System.ComponentModel.DataAnnotations;
+
+namespace MarketingApi.DTOs.MarketingTeam
+{
+    /// <summary>
+    /// Input DTO for creating a new Marketing Team with its members in one transaction.
+    /// </summary>
+    public class CreateMarketingTeamDto
+    {
+        [Required(ErrorMessage = "Team code is required.")]
+        [MaxLength(20, ErrorMessage = "Team code cannot exceed 20 characters.")]
+        public string Teamcode { get; set; } = string.Empty;
+
+        [Required(ErrorMessage = "Team name is required.")]
+        [MaxLength(100, ErrorMessage = "Team name cannot exceed 100 characters.")]
+        public string Teamname { get; set; } = string.Empty;
+
+        [Required(ErrorMessage = "Team leader is required.")]
+        public long Teamleaderid { get; set; }
+
+        [MaxLength(500, ErrorMessage = "Description cannot exceed 500 characters.")]
+        public string? Description { get; set; }
+
+        [Range(1, 2, ErrorMessage = "Status must be 1 (Active) or 2 (Inactive).")]
+        public short Status { get; set; } = 1;
+
+        public List<MarketingTeamDetailInputDto> Members { get; set; } = new List<MarketingTeamDetailInputDto>();
+    }
+}
