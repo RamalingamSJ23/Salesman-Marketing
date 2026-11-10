@@ -1,172 +1,110 @@
 import { CommonModule } from '@angular/common';
-import { Component, OnInit, OnDestroy, inject, ChangeDetectorRef, HostListener } from '@angular/core';
-import { AbstractControl, FormBuilder, FormsModule, ReactiveFormsModule, ValidationErrors, Validators } from '@angular/forms';
-import { Router, ActivatedRoute } from '@angular/router';
-import { Subject, debounceTime, switchMap, takeUntil, finalize, catchError, of } from 'rxjs';
-import { GridModule, SortService } from '@syncfusion/ej2-angular-grids';
-
+import { Component, DestroyRef, HostListener, OnInit, computed, inject, signal } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { FormsModule } from '@angular/forms';
+import { Router } from '@angular/router';
+import { Subject, catchError, debounceTime, finalize, of, switchMap } from 'rxjs';
+import { GridModule, SortEventArgs, SortService } from '@syncfusion/ej2-angular-grids';
 import { SalesmanApiService } from '../../services/salesman-api.service';
 import { ToastService } from '../../services/toast.service';
-import { PagedResult, Salesman } from '../../shared/models';
+import { PagedResult, RecordStatus, Salesman } from '../../models';
 import { ConfirmModalComponent } from '../../shared/confirm-modal/confirm-modal.component';
-
-function noFutureDateValidator(control: AbstractControl): ValidationErrors | null {
-  if (!control.value) return null;
-  const selected = new Date(control.value);
-  if (isNaN(selected.getTime())) return null;
-  const today = new Date();
-  today.setHours(23, 59, 59, 999);
-  if (selected > today) {
-    return { futureDate: true };
-  }
-  return null;
-}
+import { SalesmanFormComponent } from '../salesman-form/salesman-form.component';
+import { SortDirection } from '../../shared/constants';
+import { readApiError } from '../../shared/api-error';
 
 @Component({
   selector: 'app-salesman-list',
   standalone: true,
-  imports: [CommonModule, FormsModule, ReactiveFormsModule, GridModule, ConfirmModalComponent],
+  imports: [CommonModule, FormsModule, GridModule, ConfirmModalComponent, SalesmanFormComponent],
   providers: [SortService],
   templateUrl: './salesman-list.component.html',
 })
-export class SalesmanListComponent implements OnInit, OnDestroy {
+export class SalesmanListComponent implements OnInit {
   private readonly api = inject(SalesmanApiService);
   private readonly toast = inject(ToastService);
-  private readonly cdr = inject(ChangeDetectorRef);
-  private readonly fb = inject(FormBuilder);
   private readonly router = inject(Router);
-  private readonly route = inject(ActivatedRoute);
+  private readonly destroyRef = inject(DestroyRef);
 
   private readonly searchSubject = new Subject<void>();
-  private readonly destroy$ = new Subject<void>();
 
-  result: PagedResult<Salesman> = {
+  readonly result = signal<PagedResult<Salesman>>({
     items: [],
     totalCount: 0,
     pageNumber: 1,
     pageSize: 15,
     totalPages: 0,
-  };
-
-  search = '';
-  status: number | null = 1; // Default to Active only
-  totalActiveCount = 0;
-  totalInactiveCount = 0;
-  pageNumber = 1;
-  pageSize = 15;
-  loading = false;
-  loadingMore = false;
-  sortColumn: 'salesmancode' | 'salesmanname' = 'salesmancode';
-  sortAsc = true;
-
-  get activeCount(): number {
-    return this.result.items.filter((s) => s.status === 1).length;
-  }
-
-  get inactiveCount(): number {
-    return this.result.items.filter((s) => s.status === 2).length;
-  }
-
-  // View Modal State
-  isViewModalOpen = false;
-  viewingSalesman: Salesman | null = null;
-
-  // Create / Edit Modal State
-  isEditModalOpen = false;
-  isEditMode = false;
-  editingId: number | null = null;
-  savingSalesman = false;
-  formError = '';
-  codeConflictError = '';
-  mobileConflictError = '';
-  emailConflictError = '';
-
-  readonly form = this.fb.nonNullable.group({
-    salesmancode: [
-      '',
-      [
-        Validators.required,
-        Validators.minLength(2),
-        Validators.maxLength(20),
-        Validators.pattern(/^[a-zA-Z0-9]+$/),
-      ],
-    ],
-    salesmanname: [
-      '',
-      [
-        Validators.required,
-        Validators.minLength(2),
-        Validators.maxLength(100),
-        Validators.pattern(/^[a-zA-Z\s.'-]+$/),
-      ],
-    ],
-    mobileno: [
-      '',
-      [
-        Validators.required,
-        Validators.pattern(/^[0-9]{7,15}$/),
-      ],
-    ],
-    email: [
-      '',
-      [
-        Validators.required,
-        Validators.maxLength(100),
-        Validators.pattern(/^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$/),
-      ],
-    ],
-    joiningdate: ['', [Validators.required, noFutureDateValidator]],
-    status: [1, Validators.required],
   });
 
+  readonly search = signal('');
+  readonly status = signal<number | null>(RecordStatus.Active);
+  readonly totalActiveCount = signal(0);
+  readonly totalInactiveCount = signal(0);
+  readonly pageSize = 15;
+  readonly loading = signal(false);
+  readonly loadingMore = signal(false);
+  readonly sortBy = signal('salesmancode');
+  readonly sortDir = signal<SortDirection>('asc');
+  private currentPage = 1;
+
+  readonly activeCount = computed(
+    () => this.result().items.filter((s) => s.status === RecordStatus.Active).length
+  );
+  readonly inactiveCount = computed(
+    () => this.result().items.filter((s) => s.status === RecordStatus.Inactive).length
+  );
+
+  // View Modal State
+  readonly isViewModalOpen = signal(false);
+  readonly viewingSalesman = signal<Salesman | null>(null);
+
+  // Create / Edit Modal State (delegated to SalesmanFormComponent)
+  readonly isEditModalOpen = signal(false);
+  readonly editingSalesman = signal<Salesman | null>(null);
+
   // Toggle Confirmation Modal State
-  isModalOpen = false;
-  modalTitle = '';
-  modalMessage = '';
-  modalSubMessage = '';
-  modalConfirmText = '';
-  modalIconType: 'danger' | 'warning' | 'info' = 'danger';
-  modalConfirmBtnClass = 'btn-danger';
-  modalProcessing = false;
+  readonly isModalOpen = signal(false);
+  readonly modalTitle = signal('');
+  readonly modalMessage = signal('');
+  readonly modalSubMessage = signal('');
+  readonly modalConfirmText = signal('');
+  readonly modalIconType = signal<'danger' | 'warning' | 'info'>('danger');
+  readonly modalConfirmBtnClass = signal('btn-danger');
+  readonly modalProcessing = signal(false);
   private pendingAction: (() => void) | null = null;
 
   ngOnInit(): void {
-    const currentUrl = this.router.url;
-    if (currentUrl.includes('/deactive') || currentUrl.includes('/inactive')) {
-      this.status = 2;
-    } else {
-      this.status = 1;
-    }
+    const currentUrl = this.router.url.toLowerCase();
+    this.status.set(
+      currentUrl.includes('/deactivated') || currentUrl.includes('/deactive') || currentUrl.includes('/inactive')
+        ? RecordStatus.Inactive
+        : RecordStatus.Active
+    );
 
     this.searchSubject
       .pipe(
         debounceTime(350),
         switchMap(() => {
-          this.loading = true;
-          this.cdr.markForCheck();
+          this.currentPage = 1;
+          this.loading.set(true);
           return this.api
-            .getList(this.search, this.status, this.pageNumber, this.pageSize)
+            .getList(this.search(), this.status(), 1, this.pageSize, this.sortBy(), this.sortDir())
             .pipe(
               catchError((error) => {
-                this.toast.error(this.readError(error), 'Failed to load salesmen');
+                this.toast.error(readApiError(error), 'Failed to load salesmen');
                 return of(null);
               }),
-              finalize(() => {
-                this.loading = false;
-                this.cdr.markForCheck();
-              })
+              finalize(() => this.loading.set(false))
             );
         }),
-        takeUntil(this.destroy$)
+        takeUntilDestroyed(this.destroyRef)
       )
-      .subscribe((result) => {
-        if (result !== null) {
-          this.result = result;
-          this.applySort();
-          if (this.status === 1) this.totalActiveCount = result.totalCount;
-          if (this.status === 2) this.totalInactiveCount = result.totalCount;
+      .subscribe((res) => {
+        if (res !== null) {
+          this.result.set(res);
+          if (this.status() === RecordStatus.Active) this.totalActiveCount.set(res.totalCount);
+          if (this.status() === RecordStatus.Inactive) this.totalInactiveCount.set(res.totalCount);
         }
-        this.cdr.markForCheck();
       });
 
     this.load();
@@ -174,61 +112,57 @@ export class SalesmanListComponent implements OnInit, OnDestroy {
   }
 
   loadCounts(): void {
-    this.api.getList('', 1, 1, 1).subscribe({
-      next: (res) => {
-        this.totalActiveCount = res.totalCount;
-        this.cdr.markForCheck();
-      },
-    });
-    this.api.getList('', 2, 1, 1).subscribe({
-      next: (res) => {
-        this.totalInactiveCount = res.totalCount;
-        this.cdr.markForCheck();
-      },
-    });
+    this.api
+      .getList('', RecordStatus.Active, 1, 1)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({ next: (res) => this.totalActiveCount.set(res.totalCount) });
+
+    this.api
+      .getList('', RecordStatus.Inactive, 1, 1)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({ next: (res) => this.totalInactiveCount.set(res.totalCount) });
   }
 
   switchViewTab(tabStatus: 1 | 2): void {
-    if (this.status === tabStatus) return;
-    this.status = tabStatus;
-    this.pageNumber = 1;
-    this.result.items = [];
-    this.router.navigate([tabStatus === 1 ? '/salesman' : '/salesman/deactive']);
+    if (this.status() === tabStatus) return;
+    this.status.set(tabStatus);
+    this.currentPage = 1;
+    this.result.update((r) => ({ ...r, items: [] }));
+    this.router.navigate([tabStatus === RecordStatus.Active ? '/salesman' : '/salesman/deactivated']);
     this.load();
     this.loadCounts();
   }
 
   load(): void {
+    this.currentPage = 1;
     this.searchSubject.next();
   }
 
   loadMore(): void {
-    if (this.loading || this.loadingMore || this.pageNumber >= this.result.totalPages) {
+    const current = this.result();
+    if (this.loading() || this.loadingMore() || this.currentPage >= current.totalPages) {
       return;
     }
-    this.loadingMore = true;
-    this.pageNumber++;
-    this.cdr.markForCheck();
+
+    this.loadingMore.set(true);
+    const nextPage = this.currentPage + 1;
 
     this.api
-      .getList(this.search, this.status, this.pageNumber, this.pageSize)
+      .getList(this.search(), this.status(), nextPage, this.pageSize, this.sortBy(), this.sortDir())
       .pipe(
-        finalize(() => {
-          this.loadingMore = false;
-          this.cdr.markForCheck();
-        })
+        finalize(() => this.loadingMore.set(false)),
+        takeUntilDestroyed(this.destroyRef)
       )
       .subscribe({
         next: (res) => {
-          this.result = {
+          this.currentPage = nextPage;
+          this.result.update((prev) => ({
             ...res,
-            items: [...this.result.items, ...res.items],
-          };
-          this.applySort();
-          this.cdr.markForCheck();
+            items: [...prev.items, ...res.items],
+          }));
         },
         error: (err) => {
-          this.toast.error(this.readError(err), 'Failed to load more');
+          this.toast.error(readApiError(err), 'Failed to load more');
         },
       });
   }
@@ -243,428 +177,158 @@ export class SalesmanListComponent implements OnInit, OnDestroy {
     }
   }
 
-  onTableScroll(event: Event): void {
-    const el = event.target as HTMLElement;
-    if (el.scrollHeight - el.scrollTop - el.clientHeight < 150) {
-      this.loadMore();
-    }
-  }
-
-  onSearchChange(): void {
-    this.pageNumber = 1;
-    this.result.items = [];
+  onSearchInput(value: string): void {
+    this.search.set(value);
+    this.currentPage = 1;
+    this.result.update((r) => ({ ...r, items: [] }));
     this.load();
   }
 
-  clearSearch(): void {
-    this.search = '';
-    this.onSearchChange();
-  }
-
-  onStatusChange(val: string): void {
-    this.status = val === '' ? null : Number(val);
-    this.pageNumber = 1;
-    this.result.items = [];
-    this.load();
-  }
-
-  onStatusFilterChange(status: number | null): void {
-    this.status = status;
-    this.pageNumber = 1;
-    this.result.items = [];
-    this.load();
-  }
-
-  toggleSort(col: 'salesmancode' | 'salesmanname'): void {
-    if (this.sortColumn === col) {
-      this.sortAsc = !this.sortAsc;
-    } else {
-      this.sortColumn = col;
-      this.sortAsc = true;
-    }
-    this.applySort();
-    this.cdr.markForCheck();
-  }
-
-  private applySort(): void {
-    if (!this.result.items || this.result.items.length === 0) return;
-    this.result.items = [...this.result.items].sort((a, b) => {
-      const valA = (a[this.sortColumn] || '').toString().toLowerCase();
-      const valB = (b[this.sortColumn] || '').toString().toLowerCase();
-      return this.sortAsc ? valA.localeCompare(valB) : valB.localeCompare(valA);
-    });
-  }
-
-  onPageSizeChange(size: number): void {
-    this.pageSize = size;
-    this.pageNumber = 1;
-    this.load();
-  }
-
-  changePage(page: number): void {
-    if (page < 1 || page > this.result.totalPages || page === this.pageNumber) {
+  onGridActionBegin(args: SortEventArgs): void {
+    if (args.requestType !== 'sorting' || !args.columnName) {
       return;
     }
-    this.pageNumber = page;
+
+    args.cancel = true;
+    const col = args.columnName.toLowerCase();
+    const dir: SortDirection = args.direction === 'Descending' ? 'desc' : 'asc';
+    this.sortBy.set(col);
+    this.sortDir.set(dir);
     this.load();
   }
 
-  // --- View Modal ---
   openViewModal(salesman: Salesman): void {
-    this.viewingSalesman = salesman;
-    this.isViewModalOpen = true;
-    this.cdr.markForCheck();
+    this.viewingSalesman.set(salesman);
+    this.isViewModalOpen.set(true);
   }
 
   closeViewModal(): void {
-    this.isViewModalOpen = false;
-    this.viewingSalesman = null;
-    this.cdr.markForCheck();
+    this.isViewModalOpen.set(false);
+    this.viewingSalesman.set(null);
   }
 
-  // --- Create / Edit Modal ---
   openCreateModal(): void {
-    this.isEditMode = false;
-    this.editingId = null;
-    this.formError = '';
-    this.codeConflictError = '';
-    this.mobileConflictError = '';
-    this.emailConflictError = '';
-    this.form.reset({
-      salesmancode: '',
-      salesmanname: '',
-      mobileno: '',
-      email: '',
-      joiningdate: '',
-      status: 1,
-    });
-    this.isEditModalOpen = true;
-    this.cdr.markForCheck();
+    this.editingSalesman.set(null);
+    this.isEditModalOpen.set(true);
   }
 
   openEditModal(salesman: Salesman): void {
-    this.isEditMode = true;
-    this.editingId = salesman.id;
-    this.formError = '';
-    this.codeConflictError = '';
-    this.mobileConflictError = '';
-    this.emailConflictError = '';
-    this.form.patchValue({
-      salesmancode: salesman.salesmancode,
-      salesmanname: salesman.salesmanname,
-      mobileno: salesman.mobileno || '',
-      email: salesman.email || '',
-      joiningdate: salesman.joiningdate ? salesman.joiningdate.slice(0, 10) : '',
-      status: salesman.status,
-    });
-    this.isEditModalOpen = true;
-    this.cdr.markForCheck();
+    this.editingSalesman.set(salesman);
+    this.isEditModalOpen.set(true);
   }
 
   closeEditModal(): void {
-    this.isEditModalOpen = false;
-    this.editingId = null;
-    this.cdr.markForCheck();
+    this.isEditModalOpen.set(false);
+    this.editingSalesman.set(null);
   }
 
-  onCodeInput(): void {
-    const current = this.form.controls.salesmancode.value;
-    if (current) {
-      this.form.controls.salesmancode.setValue(current.toUpperCase(), { emitEvent: false });
-    }
-    this.codeConflictError = '';
+  onFormSaved(): void {
+    this.closeEditModal();
+    this.load();
+    this.loadCounts();
   }
 
-  onMobileInput(): void {
-    this.mobileConflictError = '';
-  }
-
-  onEmailInput(): void {
-    this.emailConflictError = '';
-  }
-
-  getErrorMessage(field: string): string {
-    const control = this.form.get(field);
-    if (!control || !control.errors || !control.touched) return '';
-
-    if (control.hasError('required')) {
-      switch (field) {
-        case 'salesmancode': return 'Salesman code is required.';
-        case 'salesmanname': return 'Salesman name is required.';
-        case 'mobileno': return 'Mobile number is required.';
-        case 'email': return 'Email is required.';
-        case 'joiningdate': return 'Joining date is required.';
-        case 'status': return 'Status is required.';
-        default: return 'This field is required.';
-      }
-    }
-    if (control.hasError('minlength')) {
-      return `Must be at least ${control.errors['minlength'].requiredLength} characters.`;
-    }
-    if (control.hasError('maxlength')) {
-      return `Cannot exceed ${control.errors['maxlength'].requiredLength} characters.`;
-    }
-    if (control.hasError('pattern')) {
-      switch (field) {
-        case 'salesmancode': return 'Only alphanumeric characters (A-Z, 0-9) allowed.';
-        case 'salesmanname': return 'Only English letters (A-Z, a-z), spaces, and standard characters (., -, \') are allowed.';
-        case 'mobileno': return 'Mobile number must be 7 to 15 digits.';
-        case 'email':
-          if (control.value && /[A-Z]/.test(control.value)) {
-            return 'Capital letters are not allowed in email. Use lowercase only.';
-          }
-          return 'Enter a valid email address in lowercase (e.g. name@company.com).';
-        default: return 'Invalid format.';
-      }
-    }
-    if (control.hasError('futureDate')) {
-      return 'Joining date cannot be in the future.';
-    }
-    return 'Invalid value.';
-  }
-
-  isFieldInvalid(name: string): boolean {
-    const control = this.form.get(name);
-    return !!control && control.invalid && control.touched;
-  }
-
-  saveSalesman(saveAndNew = false): void {
-    this.codeConflictError = '';
-    this.mobileConflictError = '';
-    this.emailConflictError = '';
-    this.formError = '';
-
-    if (this.form.invalid) {
-      this.form.markAllAsTouched();
-      this.toast.warning('Please fix validation errors.');
-      this.cdr.markForCheck();
-      return;
-    }
-
-    const value = this.form.getRawValue();
-
-    if (value.email && /[A-Z]/.test(value.email)) {
-      this.emailConflictError = 'Capital letters are not allowed in email. Use lowercase only.';
-      this.toast.error(this.emailConflictError, 'Validation Error');
-      this.cdr.markForCheck();
-      return;
-    }
-
-    this.savingSalesman = true;
-    this.cdr.markForCheck();
-
-    const request = this.isEditMode
-      ? this.api.update(this.editingId!, {
-          salesmanname: value.salesmanname.trim(),
-          mobileno: value.mobileno?.trim() || undefined,
-          email: value.email?.trim() || undefined,
-          joiningdate: value.joiningdate || undefined,
-        })
-      : this.api.create({
-          salesmancode: value.salesmancode.trim().toUpperCase(),
-          salesmanname: value.salesmanname.trim(),
-          mobileno: value.mobileno?.trim() || undefined,
-          email: value.email?.trim() || undefined,
-          joiningdate: value.joiningdate || undefined,
-          status: Number(value.status),
-        });
-
-    request.subscribe({
-      next: (saved) => {
-        this.savingSalesman = false;
-        this.toast.success(
-          `Salesman ${saved.salesmancode} ${this.isEditMode ? 'updated' : 'created'} successfully.`
-        );
-        this.load();
-
-        if (saveAndNew && !this.isEditMode) {
-          this.form.reset({
-            salesmancode: '',
-            salesmanname: '',
-            mobileno: '',
-            email: '',
-            joiningdate: '',
-            status: 1,
-          });
-          this.codeConflictError = '';
-          this.mobileConflictError = '';
-          this.emailConflictError = '';
-          this.cdr.markForCheck();
-        } else {
-          this.closeEditModal();
-        }
-      },
-      error: (error) => {
-        this.savingSalesman = false;
-        const msg = this.readError(error);
-        const lower = msg.toLowerCase();
-        if (lower.includes('mobile')) {
-          this.mobileConflictError = msg;
-          this.toast.error(msg, 'Mobile Conflict');
-        } else if (lower.includes('email')) {
-          this.emailConflictError = msg;
-          this.toast.error(msg, 'Email Conflict');
-        } else if (error.status === 409 || lower.includes('code') || lower.includes('already exists')) {
-          this.codeConflictError = msg || `Salesman code ${value.salesmancode} already exists.`;
-          this.toast.error(this.codeConflictError, 'Code Conflict');
-        } else {
-          this.formError = msg;
-          this.toast.error(msg, 'Save Failed');
-        }
-        this.cdr.markForCheck();
-      },
-    });
-  }
-
-  // Activate / Deactivate Salesman
   confirmStatusToggle(salesman: Salesman): void {
-    this.confirmStatusChange(salesman);
-  }
-
-  confirmStatusChange(salesman: Salesman): void {
-    const isActivating = salesman.status === 2;
+    const isActivating = salesman.status === RecordStatus.Inactive;
 
     if (isActivating) {
-      this.modalTitle = 'Activate Salesman';
-      this.modalMessage = `Are you sure you want to activate salesman ${salesman.salesmancode} (${salesman.salesmanname})?`;
-      this.modalSubMessage = 'This salesman will now be available to be added to active marketing teams.';
-      this.modalConfirmText = 'Activate';
-      this.modalIconType = 'info';
-      this.modalConfirmBtnClass = 'btn-success';
+      this.modalTitle.set('Activate Salesman');
+      this.modalMessage.set(`Are you sure you want to activate salesman ${salesman.salesmancode} (${salesman.salesmanname})?`);
+      this.modalSubMessage.set('This salesman will now be available to be added to active marketing teams.');
+      this.modalConfirmText.set('Activate');
+      this.modalIconType.set('info');
+      this.modalConfirmBtnClass.set('btn-success');
 
       this.pendingAction = () => {
-        this.modalProcessing = true;
-        this.cdr.markForCheck();
-        this.api.activate(salesman.id).subscribe({
-          next: () => {
-            this.modalProcessing = false;
-            this.isModalOpen = false;
-            this.toast.success(`Salesman ${salesman.salesmancode} was activated successfully.`);
-            this.cdr.markForCheck();
-            this.load();
-          },
-          error: (error) => {
-            this.modalProcessing = false;
-            this.isModalOpen = false;
-            this.toast.error(this.readError(error));
-            this.cdr.markForCheck();
-          },
-        });
+        this.modalProcessing.set(true);
+        this.api
+          .activate(salesman.id)
+          .pipe(
+            finalize(() => {
+              this.modalProcessing.set(false);
+              this.isModalOpen.set(false);
+            }),
+            takeUntilDestroyed(this.destroyRef)
+          )
+          .subscribe({
+            next: () => {
+              this.toast.success(`Salesman ${salesman.salesmancode} was activated successfully.`);
+              this.load();
+              this.loadCounts();
+            },
+            error: (error) => this.toast.error(readApiError(error)),
+          });
       };
 
-      this.isModalOpen = true;
-      this.cdr.markForCheck();
+      this.isModalOpen.set(true);
       return;
     }
 
-    // Deactivating: check active team assignment first
-    this.api.getTeamAssignment(salesman.id).subscribe({
-      next: (assignment) => {
-        if (assignment && assignment.teamId) {
-          const isLeader = assignment.isTeamLeader || assignment.role === 'TeamLeader';
-          this.modalTitle = 'Deactivation Approval Required';
-          this.modalMessage = `Salesman ${salesman.salesmancode} (${salesman.salesmanname}) is assigned to active team "${assignment.teamCode} - ${assignment.teamName}" as ${isLeader ? 'Team Leader' : 'Team Member'}.`;
-          this.modalSubMessage = isLeader
-            ? 'Because this salesman is the Team Leader, a deactivation request will be sent to the Marketing Master. When approved, the marketing team and all members inside it will also be deactivated.'
-            : 'Because this salesman is a Team Member, a deactivation request will be sent to the Marketing Master. When approved, this member will be deactivated in the team and the salesman deactivated.';
-          this.modalConfirmText = 'Submit Deactivation Request';
-          this.modalIconType = 'warning';
-          this.modalConfirmBtnClass = 'btn-warning';
-        } else {
-          this.modalTitle = 'Deactivate Salesman';
-          this.modalMessage = `Are you sure you want to deactivate salesman ${salesman.salesmancode} (${salesman.salesmanname})?`;
-          this.modalSubMessage = 'This salesman is not assigned to any active marketing team and will be deactivated immediately.';
-          this.modalConfirmText = 'Deactivate';
-          this.modalIconType = 'warning';
-          this.modalConfirmBtnClass = 'btn-warning';
-        }
+    this.api
+      .getTeamAssignment(salesman.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (assignment) => {
+          if (assignment?.teamId) {
+            const isLeader = assignment.isTeamLeader || assignment.role === 'Leader';
+            this.modalTitle.set('Deactivation Approval Required');
+            this.modalMessage.set(
+              `Salesman ${salesman.salesmancode} (${salesman.salesmanname}) is assigned to active team "${assignment.teamCode} - ${assignment.teamName}" as ${isLeader ? 'Team Leader' : 'Team Member'}.`
+            );
+            this.modalSubMessage.set(
+              isLeader
+                ? 'Because this salesman is the Team Leader, a deactivation request will be sent to the Marketing Master. When approved, the marketing team and all members inside it will also be deactivated.'
+                : 'Because this salesman is a Team Member, a deactivation request will be sent to the Marketing Master. When approved, this member will be deactivated in the team and the salesman deactivated.'
+            );
+            this.modalConfirmText.set('Submit Deactivation Request');
+            this.modalIconType.set('warning');
+            this.modalConfirmBtnClass.set('btn-warning');
+          } else {
+            this.modalTitle.set('Deactivate Salesman');
+            this.modalMessage.set(`Are you sure you want to deactivate salesman ${salesman.salesmancode} (${salesman.salesmanname})?`);
+            this.modalSubMessage.set('This salesman is not assigned to any active marketing team and will be deactivated immediately.');
+            this.modalConfirmText.set('Deactivate');
+            this.modalIconType.set('warning');
+            this.modalConfirmBtnClass.set('btn-warning');
+          }
 
-        this.pendingAction = () => {
-          this.modalProcessing = true;
-          this.cdr.markForCheck();
-          this.api.deactivate(salesman.id).subscribe({
-            next: (res) => {
-              this.modalProcessing = false;
-              this.isModalOpen = false;
-              if (res.requiresApproval) {
-                this.toast.info(res.message, 'Approval Request Submitted');
-              } else {
-                this.toast.success(res.message || `Salesman ${salesman.salesmancode} deactivated successfully.`);
-              }
-              this.cdr.markForCheck();
-              this.load();
-            },
-            error: (error) => {
-              this.modalProcessing = false;
-              this.isModalOpen = false;
-              this.toast.error(this.readError(error));
-              this.cdr.markForCheck();
-            },
-          });
-        };
+          this.pendingAction = () => {
+            this.modalProcessing.set(true);
+            this.api
+              .deactivate(salesman.id)
+              .pipe(
+                finalize(() => {
+                  this.modalProcessing.set(false);
+                  this.isModalOpen.set(false);
+                }),
+                takeUntilDestroyed(this.destroyRef)
+              )
+              .subscribe({
+                next: (res) => {
+                  if (res.requiresApproval || res.requestSentToMarketingMaster) {
+                    this.toast.info(res.message, 'Approval Request Submitted');
+                  } else {
+                    this.toast.success(res.message || `Salesman ${salesman.salesmancode} deactivated successfully.`);
+                  }
+                  this.load();
+                  this.loadCounts();
+                },
+                error: (error) => this.toast.error(readApiError(error)),
+              });
+          };
 
-        this.isModalOpen = true;
-        this.cdr.markForCheck();
-      },
-      error: (err) => {
-        this.toast.error(this.readError(err), 'Failed to check team assignment');
-      },
-    });
-  }
-
-  // Delete Salesman (Protected by Rule R2)
-  confirmDelete(salesman: Salesman): void {
-    this.modalTitle = 'Delete Salesman Record';
-    this.modalMessage = `Are you sure you want to permanently delete ${salesman.salesmancode} (${salesman.salesmanname})?`;
-    this.modalSubMessage = 'Note: Salesmen assigned to any marketing team cannot be deleted (Rule R2).';
-    this.modalConfirmText = 'Delete Salesman';
-    this.modalIconType = 'danger';
-    this.modalConfirmBtnClass = 'btn-danger';
-
-    this.pendingAction = () => {
-      this.modalProcessing = true;
-      this.cdr.markForCheck();
-      this.api.delete(salesman.id).subscribe({
-        next: () => {
-          this.modalProcessing = false;
-          this.isModalOpen = false;
-          this.toast.success(`Salesman ${salesman.salesmancode} deleted successfully.`);
-          this.cdr.markForCheck();
-          this.load();
+          this.isModalOpen.set(true);
         },
-        error: (error) => {
-          this.modalProcessing = false;
-          this.isModalOpen = false;
-          const msg = this.readError(error);
-          this.toast.error(msg, 'Cannot Delete Salesman');
-          this.cdr.markForCheck();
-        },
+        error: (err) => this.toast.error(readApiError(err), 'Failed to check team assignment'),
       });
-    };
-
-    this.isModalOpen = true;
-    this.cdr.markForCheck();
   }
 
   onModalConfirm(): void {
-    if (this.pendingAction) {
-      this.pendingAction();
-    }
+    this.pendingAction?.();
   }
 
   onModalCancel(): void {
-    this.isModalOpen = false;
+    this.isModalOpen.set(false);
     this.pendingAction = null;
-    this.cdr.markForCheck();
-  }
-
-  private readError(error: any): string {
-    return error?.error?.message || error?.message || 'The request could not be completed.';
-  }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-    this.searchSubject.complete();
   }
 }

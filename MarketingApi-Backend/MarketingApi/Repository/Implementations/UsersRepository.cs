@@ -1,30 +1,44 @@
 using MarketingApi.Data;
-using MarketingApi.Models;
-using Microsoft.AspNetCore.Mvc;
+using MarketingApi.Models.Entities;
+using MarketingApi.Repository.Interfaces;
 using Microsoft.EntityFrameworkCore;
 
-namespace MarketingApi.Repository
+namespace MarketingApi.Repository.Implementations;
+
+public class UsersRepository : IUsersRepository
 {
-    public class UsersRepository :IUsersRepository
+    private readonly SalesMarketingDbContext _dbContext;
+
+    public UsersRepository(SalesMarketingDbContext dbContext)
     {
-        private readonly SalesMarketingDbContext _dbContext;
-        public UsersRepository(SalesMarketingDbContext salesMarketingDbContext)
+        _dbContext = dbContext;
+    }
+
+    public async Task<List<Role>> GetRoles()
+    {
+        return await _dbContext.Roles
+            .AsNoTracking()
+            .OrderBy(r => r.Id)
+            .ToListAsync();
+    }
+
+    public async Task<User?> GetUserByUsernameAsync(string username, bool trackChanges = false)
+    {
+        var cleanUsername = username.Trim();
+        var query = _dbContext.Users
+            .Include(u => u.Role)
+            .AsQueryable();
+
+        if (!trackChanges)
         {
-            _dbContext = salesMarketingDbContext;
-        }
-        public async Task<List<Role>> GetRoles()
-        {
-            var roles = await _dbContext.Roles.ToListAsync();
-            
-            return roles;
+            query = query.AsNoTracking();
         }
 
-        public async Task<User?> GetUserByUsernameAsync(string username)
-        {
-            return await _dbContext.Users
-                .AsNoTracking()
-                .Include(u => u.Role)
-                .FirstOrDefaultAsync(u => u.Username.ToLower() == username.Trim().ToLower());
-        }
+        return await query.FirstOrDefaultAsync(u => EF.Functions.ILike(u.Username, cleanUsername));
+    }
+
+    public async Task SaveChangesAsync()
+    {
+        await _dbContext.SaveChangesAsync();
     }
 }

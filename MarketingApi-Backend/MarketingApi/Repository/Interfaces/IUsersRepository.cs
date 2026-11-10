@@ -1,10 +1,10 @@
-using MarketingApi.Models;
+using MarketingApi.Models.Entities;
 
-namespace MarketingApi.Repository
+namespace MarketingApi.Repository.Interfaces;
+
+public interface IUsersRepository
 {
-    public interface IUsersRepository
-    {
-        public Task<List<Role>> GetRoles();
-        public Task<User?> GetUserByUsernameAsync(string username);
-    }
+    Task<List<Role>> GetRoles();
+    Task<User?> GetUserByUsernameAsync(string username, bool trackChanges = false);
+    Task SaveChangesAsync();
 }

@@ -1,6 +1,6 @@
 import { inject } from '@angular/core';
 import { Routes, Router } from '@angular/router';
-import { authGuard, salesmanGuard, marketingGuard } from './guards/auth.guard';
+import { salesmanGuard, marketingGuard } from './guards/auth.guard';
 import { AuthService } from './services/auth.service';
 
 export const routes: Routes = [
@@ -29,13 +29,17 @@ export const routes: Routes = [
     canActivate: [salesmanGuard],
   },
   {
-    path: 'salesman/deactive',
+    path: 'salesman/deactivated',
     loadComponent: () => import('./pages/salesman-list/salesman-list.component').then((m) => m.SalesmanListComponent),
     canActivate: [salesmanGuard],
   },
   {
+    path: 'salesman/deactive',
+    redirectTo: 'salesman/deactivated',
+  },
+  {
     path: 'salesman/inactive',
-    redirectTo: 'salesman/deactive',
+    redirectTo: 'salesman/deactivated',
   },
   {
     path: 'salesman/new',
@@ -53,13 +57,17 @@ export const routes: Routes = [
     canActivate: [marketingGuard],
   },
   {
-    path: 'marketing-team/deactive',
+    path: 'marketing-team/deactivated',
     loadComponent: () => import('./pages/team-list/team-list.component').then((m) => m.TeamListComponent),
     canActivate: [marketingGuard],
   },
   {
+    path: 'marketing-team/deactive',
+    redirectTo: 'marketing-team/deactivated',
+  },
+  {
     path: 'marketing-team/inactive',
-    redirectTo: 'marketing-team/deactive',
+    redirectTo: 'marketing-team/deactivated',
   },
   {
     path: 'marketing-team/new',
@@ -78,6 +86,6 @@ export const routes: Routes = [
   },
   {
     path: '**',
-    redirectTo: 'login',
+    redirectTo: '',
   },
 ];

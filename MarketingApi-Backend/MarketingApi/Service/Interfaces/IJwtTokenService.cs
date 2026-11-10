@@ -1,9 +1,8 @@
-using MarketingApi.Models;
+using MarketingApi.Models.Entities;
 
-namespace MarketingApi.Service
+namespace MarketingApi.Service.Interfaces;
+
+public interface IJwtTokenService
 {
-    public interface IJwtTokenService
-    {
-        string GenerateToken(User user);
-    }
+    string GenerateToken(User user);
 }

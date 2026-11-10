@@ -1,434 +1,339 @@
+using FluentValidation;
 using MarketingApi.Common;
 using MarketingApi.DTOs.Common;
 using MarketingApi.DTOs.Salesman;
 using MarketingApi.Enums;
-using MarketingApi.Models;
-using MarketingApi.Repository;
-using System.Text.RegularExpressions;
+using MarketingApi.Models.Entities;
+using MarketingApi.Repository.Interfaces;
+using MarketingApi.Service.Interfaces;
 
-namespace MarketingApi.Service
+namespace MarketingApi.Service.Implementations;
+
+/// <summary>
+/// Implements business logic and validation rules for Salesman Master.
+/// </summary>
+public class SalesmanService : ISalesmanService
 {
-    /// <summary>
-    /// Implements business logic and validation rules for Salesman Master.
-    /// </summary>
-    public class SalesmanService : ISalesmanService
+    private readonly ISalesmanRepository _salesmanRepository;
+    private readonly IValidator<CreateSalesmanDto> _createValidator;
+    private readonly IValidator<UpdateSalesmanDto> _updateValidator;
+    private readonly ILogger<SalesmanService> _logger;
+
+    public SalesmanService(
+        ISalesmanRepository salesmanRepository,
+        IValidator<CreateSalesmanDto> createValidator,
+        IValidator<UpdateSalesmanDto> updateValidator,
+        ILogger<SalesmanService> logger)
     {
-        private readonly ISalesmanRepository _salesmanRepository;
+        _salesmanRepository = salesmanRepository;
+        _createValidator = createValidator;
+        _updateValidator = updateValidator;
+        _logger = logger;
+    }
 
-        public SalesmanService(ISalesmanRepository salesmanRepository)
+    public async Task<ServiceResult<PagedResultDto<SalesmanListDto>>> GetPagedSalesmenAsync(SalesmanQueryParameters parameters)
+    {
+        parameters.PageNumber = Math.Max(1, parameters.PageNumber);
+        parameters.PageSize = Math.Clamp(parameters.PageSize <= 0 ? 10 : parameters.PageSize, 1, 100);
+
+        var result = await _salesmanRepository.GetPagedSalesmenAsync(parameters);
+        return ServiceResult<PagedResultDto<SalesmanListDto>>.Ok(result);
+    }
+
+    public async Task<ServiceResult<SalesmanDto>> GetByIdAsync(long id)
+    {
+        var salesman = await _salesmanRepository.GetByIdAsync(id);
+        if (salesman == null)
         {
-            _salesmanRepository = salesmanRepository;
+            return ServiceResult<SalesmanDto>.NotFound($"Salesman with ID {id} was not found.", "SALESMAN_NOT_FOUND");
         }
 
-        /// <summary>
-        /// Retrieves a paginated list of salesmen with optional search and status filter.
-        /// </summary>
-        public async Task<ServiceResult<PagedResultDto<SalesmanListDto>>> GetPagedSalesmenAsync(SalesmanQueryParameters parameters)
-        {
-            // Set safe defaults for pagination
-            if (parameters.PageNumber <= 0) parameters.PageNumber = 1;
-            if (parameters.PageSize <= 0) parameters.PageSize = 10;
+        return ServiceResult<SalesmanDto>.Ok(MapToDto(salesman));
+    }
 
-            var result = await _salesmanRepository.GetPagedSalesmenAsync(parameters);
-            return ServiceResult<PagedResultDto<SalesmanListDto>>.Ok(result);
+    /// <summary>
+    /// Creates a new salesman (Rule R1: unique code, unique mobile/email, auto-normalized).
+    /// </summary>
+    public async Task<ServiceResult<SalesmanDto>> CreateSalesmanAsync(CreateSalesmanDto dto)
+    {
+        var validation = await _createValidator.ValidateAsync(dto);
+        if (!validation.IsValid)
+        {
+            var failure = validation.Errors[0];
+            _logger.LogWarning("Salesman creation validation failed on {Field}: {Error}", failure.PropertyName, failure.ErrorMessage);
+            return ServiceResult<SalesmanDto>.BadRequest(failure.ErrorMessage, failure.PropertyName.ToLowerInvariant(), "VALIDATION_ERROR");
         }
 
-        /// <summary>
-        /// Gets a single salesman by ID.
-        /// </summary>
-        public async Task<ServiceResult<SalesmanDto>> GetByIdAsync(long id)
+        var cleanCode = dto.Salesmancode.Trim().ToUpperInvariant();
+        if (await _salesmanRepository.CodeExistsAsync(cleanCode))
         {
-            var salesman = await _salesmanRepository.GetByIdAsync(id);
-            if (salesman == null)
-            {
-                return ServiceResult<SalesmanDto>.NotFound($"Salesman with ID {id} was not found.");
-            }
-
-            return ServiceResult<SalesmanDto>.Ok(MapToDto(salesman));
+            return ServiceResult<SalesmanDto>.Conflict($"Salesman code {cleanCode} already exists.", "salesmancode", "DUPLICATE_SALESMAN_CODE");
         }
 
-        /// <summary>
-        /// Creates a new salesman.
-        /// Enforces Rule R1 (Unique code) and date/mobile validations.
-        /// </summary>
-        public async Task<ServiceResult<SalesmanDto>> CreateSalesmanAsync(CreateSalesmanDto dto)
+        var cleanMobile = dto.Mobileno.Trim();
+        if (await _salesmanRepository.MobileExistsAsync(cleanMobile))
         {
-            var cleanCode = dto.Salesmancode.Trim().ToUpper();
+            return ServiceResult<SalesmanDto>.Conflict("Mobile number already exists.", "mobileno", "DUPLICATE_MOBILE");
+        }
 
-            // Rule R1: Salesman code is required and unique
-            var codeExists = await _salesmanRepository.CodeExistsAsync(cleanCode);
-            if (codeExists)
+        var cleanEmail = dto.Email.Trim().ToLowerInvariant();
+        if (await _salesmanRepository.EmailExistsAsync(cleanEmail))
+        {
+            return ServiceResult<SalesmanDto>.Conflict("Email address already exists.", "email", "DUPLICATE_EMAIL");
+        }
+
+        var salesman = new Salesman
+        {
+            SalesmanCode = cleanCode,
+            SalesmanName = dto.Salesmanname.Trim(),
+            MobileNo = cleanMobile,
+            Email = cleanEmail,
+            JoiningDate = dto.Joiningdate,
+            Status = dto.Status == (short)RecordStatus.Inactive ? (short)RecordStatus.Inactive : (short)RecordStatus.Active
+        };
+
+        var created = await _salesmanRepository.CreateAsync(salesman);
+        _logger.LogInformation("Salesman {SalesmanId} ({SalesmanCode}) created.", created.Id, created.SalesmanCode);
+        return ServiceResult<SalesmanDto>.Created(MapToDto(created));
+    }
+
+    public async Task<ServiceResult<SalesmanDto>> UpdateSalesmanAsync(long id, UpdateSalesmanDto dto)
+    {
+        var salesman = await _salesmanRepository.GetByIdAsync(id);
+        if (salesman == null)
+        {
+            return ServiceResult<SalesmanDto>.NotFound($"Salesman with ID {id} was not found.", "SALESMAN_NOT_FOUND");
+        }
+
+        var validation = await _updateValidator.ValidateAsync(dto);
+        if (!validation.IsValid)
+        {
+            var failure = validation.Errors[0];
+            _logger.LogWarning("Salesman {SalesmanId} update validation failed on {Field}: {Error}", id, failure.PropertyName, failure.ErrorMessage);
+            return ServiceResult<SalesmanDto>.BadRequest(failure.ErrorMessage, failure.PropertyName.ToLowerInvariant(), "VALIDATION_ERROR");
+        }
+
+        var cleanMobile = dto.Mobileno.Trim();
+        if (await _salesmanRepository.MobileExistsAsync(cleanMobile, id))
+        {
+            return ServiceResult<SalesmanDto>.Conflict("Mobile number already exists.", "mobileno", "DUPLICATE_MOBILE");
+        }
+
+        var cleanEmail = dto.Email.Trim().ToLowerInvariant();
+        if (await _salesmanRepository.EmailExistsAsync(cleanEmail, id))
+        {
+            return ServiceResult<SalesmanDto>.Conflict("Email address already exists.", "email", "DUPLICATE_EMAIL");
+        }
+
+        salesman.SalesmanName = dto.Salesmanname.Trim();
+        salesman.MobileNo = cleanMobile;
+        salesman.Email = cleanEmail;
+        salesman.JoiningDate = dto.Joiningdate;
+
+        await _salesmanRepository.UpdateAsync(salesman);
+        _logger.LogInformation("Salesman {SalesmanId} ({SalesmanCode}) updated.", salesman.Id, salesman.SalesmanCode);
+        return ServiceResult<SalesmanDto>.Ok(MapToDto(salesman));
+    }
+
+    public async Task<ServiceResult<ActiveTeamAssignmentDto?>> CheckSalesmanTeamAssignmentAsync(long salesmanId)
+    {
+        var assignment = await _salesmanRepository.GetActiveTeamAssignmentAsync(salesmanId);
+        return ServiceResult<ActiveTeamAssignmentDto?>.Ok(assignment);
+    }
+
+    public async Task<ServiceResult<DeactivateSalesmanResultDto>> DeactivateSalesmanAsync(long id, string requestedBy)
+    {
+        var salesman = await _salesmanRepository.GetByIdAsync(id);
+        if (salesman == null)
+        {
+            return ServiceResult<DeactivateSalesmanResultDto>.NotFound($"Salesman with ID {id} was not found.", "SALESMAN_NOT_FOUND");
+        }
+
+        if (salesman.Status == (short)RecordStatus.Inactive)
+        {
+            return ServiceResult<DeactivateSalesmanResultDto>.BadRequest(
+                $"Salesman {salesman.SalesmanCode} is already inactive.",
+                code: "ALREADY_INACTIVE");
+        }
+
+        var existingPending = await _salesmanRepository.GetPendingRequestForSalesmanAsync(id);
+        if (existingPending != null)
+        {
+            return ServiceResult<DeactivateSalesmanResultDto>.BadRequest(
+                $"A deactivation request for salesman {salesman.SalesmanCode} is already pending approval from Marketing Master.",
+                code: "DEACTIVATION_ALREADY_PENDING");
+        }
+
+        var assignment = await _salesmanRepository.GetActiveTeamAssignmentAsync(id);
+        if (assignment != null)
+        {
+            var request = new SalesmanDeactivationRequest
             {
-                return ServiceResult<SalesmanDto>.Conflict($"Salesman code {cleanCode} already exists.");
-            }
-
-            // Validation: Salesman name (English letters, spaces, standard punctuation only)
-            if (!Regex.IsMatch(dto.Salesmanname.Trim(), @"^[a-zA-Z\s.'-]+$"))
-            {
-                return ServiceResult<SalesmanDto>.BadRequest("Salesman name must contain English letters only.");
-            }
-
-            // Validation: Joining date cannot be in the future
-            if (dto.Joiningdate.HasValue && dto.Joiningdate.Value > DateOnly.FromDateTime(DateTime.Today))
-            {
-                return ServiceResult<SalesmanDto>.BadRequest("Joining date cannot be in the future.");
-            }
-
-            // Validation: Mobile number format (digits, 7-15 chars) and uniqueness
-            if (!string.IsNullOrWhiteSpace(dto.Mobileno))
-            {
-                var cleanMobile = dto.Mobileno.Trim();
-                if (!Regex.IsMatch(cleanMobile, @"^[0-9]{7,15}$"))
-                {
-                    return ServiceResult<SalesmanDto>.BadRequest("Mobile number must be between 7 and 15 digits.");
-                }
-
-                var mobileExists = await _salesmanRepository.MobileExistsAsync(cleanMobile);
-                if (mobileExists)
-                {
-                    return ServiceResult<SalesmanDto>.Conflict($"Mobile number {cleanMobile} already exists.");
-                }
-            }
-
-            // Validation: Email format, uniqueness, and lowercase only (no capital letters)
-            if (!string.IsNullOrWhiteSpace(dto.Email))
-            {
-                var cleanEmail = dto.Email.Trim();
-                if (cleanEmail.Any(char.IsUpper))
-                {
-                    return ServiceResult<SalesmanDto>.BadRequest("Capital letters are not allowed in email. Email must be in lowercase only.");
-                }
-
-                var emailExists = await _salesmanRepository.EmailExistsAsync(cleanEmail);
-                if (emailExists)
-                {
-                    return ServiceResult<SalesmanDto>.Conflict($"Email address {cleanEmail} already exists.");
-                }
-            }
-
-            // Create entity
-            var salesman = new Salesman
-            {
-                Salesmancode = cleanCode,
-                Salesmanname = dto.Salesmanname.Trim(),
-                Mobileno = string.IsNullOrWhiteSpace(dto.Mobileno) ? null : dto.Mobileno.Trim(),
-                Email = string.IsNullOrWhiteSpace(dto.Email) ? null : dto.Email.Trim(),
-                Joiningdate = dto.Joiningdate,
-                Status = dto.Status == 2 ? (short)RecordStatus.Inactive : (short)RecordStatus.Active,
-                Createddate = DateTime.UtcNow
+                SalesmanId = salesman.Id,
+                SalesmanCode = salesman.SalesmanCode,
+                SalesmanName = salesman.SalesmanName,
+                TeamId = assignment.TeamId,
+                TeamCode = assignment.TeamCode,
+                TeamName = assignment.TeamName,
+                RoleInTeam = assignment.RoleInTeam,
+                Reason = $"Salesman deactivation requested while assigned as {assignment.RoleInTeam} in Team {assignment.TeamCode}.",
+                RequestedBy = requestedBy,
+                Status = nameof(DeactivationRequestStatus.Pending),
+                RequestedDate = DateTime.UtcNow
             };
 
-            var created = await _salesmanRepository.CreateAsync(salesman);
-            return ServiceResult<SalesmanDto>.Created(MapToDto(created));
-        }
-
-        /// <summary>
-        /// Updates an existing salesman details (Name, Mobile, Email, Joining Date).
-        /// Note: Salesmancode and Status are NOT modified here.
-        /// Status is changed via dedicated Deactivate/Activate endpoints.
-        /// </summary>
-        public async Task<ServiceResult<SalesmanDto>> UpdateSalesmanAsync(long id, UpdateSalesmanDto dto)
-        {
-            var salesman = await _salesmanRepository.GetByIdAsync(id);
-            if (salesman == null)
-            {
-                return ServiceResult<SalesmanDto>.NotFound($"Salesman with ID {id} was not found.");
-            }
-
-            // Validation: Joining date cannot be in the future
-            if (dto.Joiningdate.HasValue && dto.Joiningdate.Value > DateOnly.FromDateTime(DateTime.Today))
-            {
-                return ServiceResult<SalesmanDto>.BadRequest("Joining date cannot be in the future.");
-            }
-
-            // Validation: Mobile number format and uniqueness
-            if (!string.IsNullOrWhiteSpace(dto.Mobileno))
-            {
-                var cleanMobile = dto.Mobileno.Trim();
-                if (!Regex.IsMatch(cleanMobile, @"^[0-9]{7,15}$"))
-                {
-                    return ServiceResult<SalesmanDto>.BadRequest("Mobile number must be between 7 and 15 digits.");
-                }
-
-                var mobileExists = await _salesmanRepository.MobileExistsAsync(cleanMobile, id);
-                if (mobileExists)
-                {
-                    return ServiceResult<SalesmanDto>.Conflict($"Mobile number {cleanMobile} already exists.");
-                }
-            }
-
-            // Validation: Email format, uniqueness, and lowercase only (no capital letters)
-            if (!string.IsNullOrWhiteSpace(dto.Email))
-            {
-                var cleanEmail = dto.Email.Trim();
-                if (cleanEmail.Any(char.IsUpper))
-                {
-                    return ServiceResult<SalesmanDto>.BadRequest("Capital letters are not allowed in email. Email must be in lowercase only.");
-                }
-
-                var emailExists = await _salesmanRepository.EmailExistsAsync(cleanEmail, id);
-                if (emailExists)
-                {
-                    return ServiceResult<SalesmanDto>.Conflict($"Email address {cleanEmail} already exists.");
-                }
-            }
-
-            // Validation: Salesman name (English letters, spaces, standard punctuation only)
-            if (!Regex.IsMatch(dto.Salesmanname.Trim(), @"^[a-zA-Z\s.'-]+$"))
-            {
-                return ServiceResult<SalesmanDto>.BadRequest("Salesman name must contain English letters only.");
-            }
-
-            // Update fields (Status is preserved as-is!)
-            salesman.Salesmanname = dto.Salesmanname.Trim();
-            salesman.Mobileno = string.IsNullOrWhiteSpace(dto.Mobileno) ? null : dto.Mobileno.Trim();
-            salesman.Email = string.IsNullOrWhiteSpace(dto.Email) ? null : dto.Email.Trim();
-            salesman.Joiningdate = dto.Joiningdate;
-            salesman.Modifieddate = DateTime.UtcNow;
-
-            await _salesmanRepository.UpdateAsync(salesman);
-            return ServiceResult<SalesmanDto>.Ok(MapToDto(salesman));
-        }
-
-        /// <summary>
-        /// Checks if a salesman is currently assigned to an active marketing team (as leader or member).
-        /// </summary>
-        public async Task<ServiceResult<ActiveTeamAssignmentDto?>> CheckSalesmanTeamAssignmentAsync(long salesmanId)
-        {
-            var assignment = await _salesmanRepository.GetActiveTeamAssignmentAsync(salesmanId);
-            return ServiceResult<ActiveTeamAssignmentDto?>.Ok(assignment);
-        }
-
-        /// <summary>
-        /// Deactivates a salesman by ID.
-        /// If the salesman is an active Team Leader or Team Member, sends a deactivation request to Marketing Master.
-        /// If the salesman has no active team assignment, deactivates directly.
-        /// </summary>
-        public async Task<ServiceResult<DeactivateSalesmanResultDto>> DeactivateSalesmanAsync(long id, string requestedBy = "superviser")
-        {
-            var salesman = await _salesmanRepository.GetByIdAsync(id);
-            if (salesman == null)
-            {
-                return ServiceResult<DeactivateSalesmanResultDto>.NotFound($"Salesman with ID {id} was not found.");
-            }
-
-            // Check if there is already a pending deactivation request
-            var existingPending = await _salesmanRepository.GetPendingRequestForSalesmanAsync(id);
-            if (existingPending != null)
-            {
-                return ServiceResult<DeactivateSalesmanResultDto>.BadRequest(
-                    $"A deactivation request for salesman {salesman.Salesmancode} is already pending approval from Marketing Master.");
-            }
-
-            // Check if salesman is assigned to any active team (as Leader or Member)
-            var assignment = await _salesmanRepository.GetActiveTeamAssignmentAsync(id);
-            if (assignment != null)
-            {
-                // Must send deactivation request to Marketing Master!
-                var request = new SalesmanDeactivationRequest
-                {
-                    Salesmanid = salesman.Id,
-                    Salesmancode = salesman.Salesmancode,
-                    Salesmanname = salesman.Salesmanname,
-                    Teamid = assignment.TeamId,
-                    Teamcode = assignment.TeamCode,
-                    Teamname = assignment.TeamName,
-                    Roleinteam = assignment.RoleInTeam,
-                    Reason = $"Salesman deactivation requested while assigned as {assignment.RoleInTeam} in Team {assignment.TeamCode}.",
-                    Requestedby = requestedBy,
-                    Status = "Pending",
-                    Requesteddate = DateTime.UtcNow
-                };
-
-                var createdRequest = await _salesmanRepository.CreateDeactivationRequestAsync(request);
-
-                return ServiceResult<DeactivateSalesmanResultDto>.Ok(new DeactivateSalesmanResultDto
-                {
-                    DirectDeactivation = false,
-                    RequestSentToMarketingMaster = true,
-                    Message = $"Deactivation request submitted to Marketing Master for approval. Salesman {salesman.Salesmancode} is currently {assignment.RoleInTeam} in Team {assignment.TeamCode}.",
-                    Salesman = MapToDto(salesman),
-                    DeactivationRequest = MapToRequestDto(createdRequest)
-                });
-            }
-
-            // Not assigned to any active team -> direct deactivation!
-            salesman.Status = (short)RecordStatus.Inactive; // 2
-            salesman.Modifieddate = DateTime.UtcNow;
-
-            await _salesmanRepository.UpdateAsync(salesman);
+            var createdRequest = await _salesmanRepository.CreateDeactivationRequestAsync(request);
+            _logger.LogInformation(
+                "Deactivation request {RequestId} created for salesman {SalesmanId} ({RoleInTeam} in {TeamCode}) by {User}.",
+                createdRequest.Id, salesman.Id, assignment.RoleInTeam, assignment.TeamCode, requestedBy);
 
             return ServiceResult<DeactivateSalesmanResultDto>.Ok(new DeactivateSalesmanResultDto
             {
-                DirectDeactivation = true,
-                RequestSentToMarketingMaster = false,
-                Message = $"Salesman {salesman.Salesmancode} deactivated successfully.",
-                Salesman = MapToDto(salesman)
+                DirectDeactivation = false,
+                RequestSentToMarketingMaster = true,
+                Message = $"Deactivation request submitted to Marketing Master for approval. Salesman {salesman.SalesmanCode} is currently {assignment.RoleInTeam} in Team {assignment.TeamCode}.",
+                Salesman = MapToDto(salesman),
+                DeactivationRequest = MapToRequestDto(createdRequest)
             });
         }
 
-        public async Task<ServiceResult<List<SalesmanDeactivationRequestDto>>> GetPendingDeactivationRequestsAsync()
+        salesman.Status = (short)RecordStatus.Inactive;
+        await _salesmanRepository.UpdateAsync(salesman);
+        _logger.LogInformation("Salesman {SalesmanId} ({SalesmanCode}) deactivated directly by {User}.", salesman.Id, salesman.SalesmanCode, requestedBy);
+
+        return ServiceResult<DeactivateSalesmanResultDto>.Ok(new DeactivateSalesmanResultDto
         {
-            var list = await _salesmanRepository.GetPendingDeactivationRequestsAsync();
-            return ServiceResult<List<SalesmanDeactivationRequestDto>>.Ok(list.Select(MapToRequestDto).ToList());
+            DirectDeactivation = true,
+            RequestSentToMarketingMaster = false,
+            Message = $"Salesman {salesman.SalesmanCode} deactivated successfully.",
+            Salesman = MapToDto(salesman)
+        });
+    }
+
+    public async Task<ServiceResult<List<SalesmanDeactivationRequestDto>>> GetPendingDeactivationRequestsAsync()
+    {
+        var list = await _salesmanRepository.GetPendingDeactivationRequestsAsync();
+        return ServiceResult<List<SalesmanDeactivationRequestDto>>.Ok(list.Select(MapToRequestDto).ToList());
+    }
+
+    public async Task<ServiceResult<SalesmanDeactivationRequestDto>> ApproveDeactivationRequestAsync(long requestId, string processedBy)
+    {
+        var request = await _salesmanRepository.GetDeactivationRequestByIdAsync(requestId);
+        if (request == null)
+        {
+            return ServiceResult<SalesmanDeactivationRequestDto>.NotFound($"Deactivation request with ID {requestId} was not found.");
         }
 
-        public async Task<ServiceResult<SalesmanDeactivationRequestDto>> ApproveDeactivationRequestAsync(long requestId, string processedBy = "marketing")
+        if (!string.Equals(request.Status, nameof(DeactivationRequestStatus.Pending), StringComparison.OrdinalIgnoreCase))
         {
-            var request = await _salesmanRepository.GetDeactivationRequestByIdAsync(requestId);
-            if (request == null)
-            {
-                return ServiceResult<SalesmanDeactivationRequestDto>.NotFound($"Deactivation request with ID {requestId} was not found.");
-            }
-
-            if (request.Status != "Pending")
-            {
-                return ServiceResult<SalesmanDeactivationRequestDto>.BadRequest($"Request is already {request.Status}.");
-            }
-
-            var salesman = await _salesmanRepository.GetByIdAsync(request.Salesmanid);
-            if (salesman == null)
-            {
-                return ServiceResult<SalesmanDeactivationRequestDto>.NotFound($"Salesman with ID {request.Salesmanid} was not found.");
-            }
-
-            // If salesman was Team Leader of the team:
-            if (request.Roleinteam == "Leader" && request.Teamid.HasValue)
-            {
-                // Deactivate team and all members inside the team
-                await _salesmanRepository.DeactivateTeamAndMembersAsync(request.Teamid.Value);
-            }
-            else if (request.Teamid.HasValue)
-            {
-                // If salesman was team member: deactivate member inside team
-                await _salesmanRepository.DeactivateTeamMemberAsync(request.Teamid.Value, request.Salesmanid);
-            }
-
-            // Deactivate salesman in salesman master
-            salesman.Status = (short)RecordStatus.Inactive; // 2
-            salesman.Modifieddate = DateTime.UtcNow;
-            await _salesmanRepository.UpdateAsync(salesman);
-
-            // Mark request approved
-            request.Status = "Approved";
-            request.Processeddate = DateTime.UtcNow;
-            request.Processedby = processedBy;
-            await _salesmanRepository.UpdateDeactivationRequestAsync(request);
-
-            return ServiceResult<SalesmanDeactivationRequestDto>.Ok(MapToRequestDto(request));
+            return ServiceResult<SalesmanDeactivationRequestDto>.BadRequest($"Request is already {request.Status}.", code: "INVALID_REQUEST_STATE");
         }
 
-        public async Task<ServiceResult<SalesmanDeactivationRequestDto>> RejectDeactivationRequestAsync(long requestId, string processedBy = "marketing", string? notes = null)
+        var salesman = await _salesmanRepository.GetByIdAsync(request.SalesmanId);
+        if (salesman == null)
         {
-            var request = await _salesmanRepository.GetDeactivationRequestByIdAsync(requestId);
-            if (request == null)
-            {
-                return ServiceResult<SalesmanDeactivationRequestDto>.NotFound($"Deactivation request with ID {requestId} was not found.");
-            }
-
-            if (request.Status != "Pending")
-            {
-                return ServiceResult<SalesmanDeactivationRequestDto>.BadRequest($"Request is already {request.Status}.");
-            }
-
-            request.Status = "Rejected";
-            request.Processeddate = DateTime.UtcNow;
-            request.Processedby = processedBy;
-            request.Notes = notes;
-            await _salesmanRepository.UpdateDeactivationRequestAsync(request);
-
-            return ServiceResult<SalesmanDeactivationRequestDto>.Ok(MapToRequestDto(request));
+            return ServiceResult<SalesmanDeactivationRequestDto>.NotFound($"Salesman with ID {request.SalesmanId} was not found.");
         }
 
-        /// <summary>
-        /// Activates a salesman by ID (sets status = 1, Active).
-        /// </summary>
-        public async Task<ServiceResult<SalesmanDto>> ActivateSalesmanAsync(long id)
+        // Re-evaluate current active assignment at approval time rather than trusting stale snapshot (H5)
+        var currentAssignment = await _salesmanRepository.GetActiveTeamAssignmentAsync(request.SalesmanId);
+
+        var approved = await _salesmanRepository.ApproveDeactivationAtomicallyAsync(
+            request,
+            salesman,
+            currentAssignment,
+            processedBy);
+
+        _logger.LogInformation(
+            "Deactivation request {RequestId} for salesman {SalesmanId} approved by {User} (current role: {Role}).",
+            requestId, salesman.Id, processedBy, currentAssignment?.RoleInTeam ?? "None");
+
+        return ServiceResult<SalesmanDeactivationRequestDto>.Ok(MapToRequestDto(approved));
+    }
+
+    public async Task<ServiceResult<SalesmanDeactivationRequestDto>> RejectDeactivationRequestAsync(long requestId, string processedBy, string? notes = null)
+    {
+        var request = await _salesmanRepository.GetDeactivationRequestByIdAsync(requestId);
+        if (request == null)
         {
-            var salesman = await _salesmanRepository.GetByIdAsync(id);
-            if (salesman == null)
-            {
-                return ServiceResult<SalesmanDto>.NotFound($"Salesman with ID {id} was not found.");
-            }
-
-            salesman.Status = (short)RecordStatus.Active; // 1
-            salesman.Modifieddate = DateTime.UtcNow;
-
-            await _salesmanRepository.UpdateAsync(salesman);
-            return ServiceResult<SalesmanDto>.Ok(MapToDto(salesman));
+            return ServiceResult<SalesmanDeactivationRequestDto>.NotFound($"Deactivation request with ID {requestId} was not found.");
         }
 
-        /// <summary>
-        /// Deletes a salesman.
-        /// Enforces Rule R2: If assigned to a team, cannot be deleted.
-        /// </summary>
-        public async Task<ServiceResult> DeleteSalesmanAsync(long id)
+        if (!string.Equals(request.Status, nameof(DeactivationRequestStatus.Pending), StringComparison.OrdinalIgnoreCase))
         {
-            var salesman = await _salesmanRepository.GetByIdAsync(id);
-            if (salesman == null)
-            {
-                return ServiceResult.NotFound($"Salesman with ID {id} was not found.");
-            }
-
-            // Rule R2: A salesman assigned to any team cannot be deleted
-            var isAssigned = await _salesmanRepository.IsAssignedToAnyTeamAsync(id);
-            if (isAssigned)
-            {
-                return ServiceResult.BadRequest("Salesman is assigned to a team. Make them Inactive instead.");
-            }
-
-            await _salesmanRepository.DeleteAsync(salesman);
-            return ServiceResult.Ok();
+            return ServiceResult<SalesmanDeactivationRequestDto>.BadRequest($"Request is already {request.Status}.", code: "INVALID_REQUEST_STATE");
         }
 
-        /// <summary>
-        /// Returns active salesmen for dropdown controls in Marketing Team forms.
-        /// </summary>
-        public async Task<ServiceResult<List<SalesmanLookupDto>>> GetActiveSalesmenLookupAsync()
+        request.Status = nameof(DeactivationRequestStatus.Rejected);
+        request.ProcessedDate = DateTime.UtcNow;
+        request.ProcessedBy = processedBy;
+        request.Notes = string.IsNullOrWhiteSpace(notes) ? null : notes.Trim();
+        await _salesmanRepository.UpdateDeactivationRequestAsync(request);
+
+        _logger.LogInformation("Deactivation request {RequestId} for salesman {SalesmanId} rejected by {User}.", requestId, request.SalesmanId, processedBy);
+        return ServiceResult<SalesmanDeactivationRequestDto>.Ok(MapToRequestDto(request));
+    }
+
+    public async Task<ServiceResult<SalesmanDto>> ActivateSalesmanAsync(long id, string processedBy)
+    {
+        var salesman = await _salesmanRepository.GetByIdAsync(id);
+        if (salesman == null)
         {
-            var lookup = await _salesmanRepository.GetActiveSalesmenLookupAsync();
-            return ServiceResult<List<SalesmanLookupDto>>.Ok(lookup);
+            return ServiceResult<SalesmanDto>.NotFound($"Salesman with ID {id} was not found.", "SALESMAN_NOT_FOUND");
         }
 
-        /// <summary>
-        /// Helper method to map a Salesman entity to SalesmanDto.
-        /// </summary>
-        private static SalesmanDto MapToDto(Salesman s)
+        if (salesman.Status == (short)RecordStatus.Active)
         {
-            return new SalesmanDto
-            {
-                Id = s.Id,
-                Salesmancode = s.Salesmancode,
-                Salesmanname = s.Salesmanname,
-                Mobileno = s.Mobileno,
-                Email = s.Email,
-                Joiningdate = s.Joiningdate,
-                Status = s.Status,
-                Createddate = s.Createddate,
-                Modifieddate = s.Modifieddate
-            };
+            return ServiceResult<SalesmanDto>.BadRequest($"Salesman {salesman.SalesmanCode} is already active.", code: "ALREADY_ACTIVE");
         }
 
-        private static SalesmanDeactivationRequestDto MapToRequestDto(SalesmanDeactivationRequest r)
+        await _salesmanRepository.ActivateSalesmanAndCancelPendingRequestsAsync(salesman, processedBy);
+        _logger.LogInformation("Salesman {SalesmanId} ({SalesmanCode}) activated by {User}.", salesman.Id, salesman.SalesmanCode, processedBy);
+
+        return ServiceResult<SalesmanDto>.Ok(MapToDto(salesman));
+    }
+
+    public async Task<ServiceResult<List<SalesmanLookupDto>>> GetActiveSalesmenLookupAsync()
+    {
+        var lookup = await _salesmanRepository.GetActiveSalesmenLookupAsync();
+        return ServiceResult<List<SalesmanLookupDto>>.Ok(lookup);
+    }
+
+    private static SalesmanDto MapToDto(Salesman s)
+    {
+        return new SalesmanDto
         {
-            return new SalesmanDeactivationRequestDto
-            {
-                Id = r.Id,
-                SalesmanId = r.Salesmanid,
-                SalesmanCode = r.Salesmancode,
-                SalesmanName = r.Salesmanname,
-                TeamId = r.Teamid,
-                TeamCode = r.Teamcode,
-                TeamName = r.Teamname,
-                RoleInTeam = r.Roleinteam,
-                Reason = r.Reason,
-                RequestedBy = r.Requestedby,
-                Status = r.Status,
-                RequestedDate = r.Requesteddate,
-                ProcessedDate = r.Processeddate,
-                ProcessedBy = r.Processedby,
-                Notes = r.Notes
-            };
-        }
+            Id = s.Id,
+            Salesmancode = s.SalesmanCode,
+            Salesmanname = s.SalesmanName,
+            Mobileno = s.MobileNo,
+            Email = s.Email,
+            Joiningdate = s.JoiningDate,
+            Status = s.Status,
+            Createddate = s.CreatedDate,
+            Modifieddate = s.ModifiedDate
+        };
+    }
+
+    private static SalesmanDeactivationRequestDto MapToRequestDto(SalesmanDeactivationRequest r)
+    {
+        return new SalesmanDeactivationRequestDto
+        {
+            Id = r.Id,
+            SalesmanId = r.SalesmanId,
+            SalesmanCode = r.SalesmanCode,
+            SalesmanName = r.SalesmanName,
+            TeamId = r.TeamId,
+            TeamCode = r.TeamCode,
+            TeamName = r.TeamName,
+            RoleInTeam = r.RoleInTeam,
+            Reason = r.Reason,
+            RequestedBy = r.RequestedBy,
+            Status = r.Status,
+            RequestedDate = r.RequestedDate,
+            ProcessedDate = r.ProcessedDate,
+            ProcessedBy = r.ProcessedBy,
+            Notes = r.Notes
+        };
     }
 }

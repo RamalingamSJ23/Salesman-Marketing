@@ -1,40 +1,26 @@
-using System;
+using MarketingApi.Enums;
 
-namespace MarketingApi.Models;
+namespace MarketingApi.Models.Entities;
 
 public partial class SalesmanDeactivationRequest
 {
     public long Id { get; set; }
-
-    public long Salesmanid { get; set; }
-
-    public string Salesmancode { get; set; } = null!;
-
-    public string Salesmanname { get; set; } = null!;
-
-    public long? Teamid { get; set; }
-
-    public string? Teamcode { get; set; }
-
-    public string? Teamname { get; set; }
-
-    public string Roleinteam { get; set; } = null!; // "Leader" or "Member"
-
+    public long SalesmanId { get; set; }
+    public string SalesmanCode { get; set; } = null!;
+    public string SalesmanName { get; set; } = null!;
+    public long? TeamId { get; set; }
+    public string? TeamCode { get; set; }
+    public string? TeamName { get; set; }
+    public string RoleInTeam { get; set; } = null!;
     public string? Reason { get; set; }
-
-    public string Requestedby { get; set; } = "superviser";
-
-    public string Status { get; set; } = "Pending"; // "Pending", "Approved", "Rejected"
-
-    public DateTime Requesteddate { get; set; } = DateTime.UtcNow;
-
-    public DateTime? Processeddate { get; set; }
-
-    public string? Processedby { get; set; }
-
+    public string RequestedBy { get; set; } = string.Empty;
+    public string Status { get; set; } = nameof(DeactivationRequestStatus.Pending);
+    public DateTime RequestedDate { get; set; } = DateTime.UtcNow;
+    public DateTime? ProcessedDate { get; set; }
+    public string? ProcessedBy { get; set; }
     public string? Notes { get; set; }
+    public uint Version { get; set; }
 
     public virtual Salesman Salesman { get; set; } = null!;
-
-    public virtual Marketingteam? Team { get; set; }
+    public virtual MarketingTeam? Team { get; set; }
 }

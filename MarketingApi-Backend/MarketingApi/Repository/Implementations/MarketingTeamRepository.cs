@@ -1,353 +1,351 @@
+using MarketingApi.Common;
 using MarketingApi.Data;
 using MarketingApi.DTOs.Common;
 using MarketingApi.DTOs.MarketingTeam;
 using MarketingApi.Enums;
-using MarketingApi.Models;
+using MarketingApi.Models.Entities;
+using MarketingApi.Repository.Interfaces;
 using Microsoft.EntityFrameworkCore;
 
-namespace MarketingApi.Repository
+namespace MarketingApi.Repository.Implementations;
+
+/// <summary>
+/// Repository implementation for Marketing Team database operations using EF Core.
+/// Manages master-detail transactions and row merge.
+/// </summary>
+public class MarketingTeamRepository : IMarketingTeamRepository
 {
-    /// <summary>
-    /// Repository implementation for Marketing Team database operations using EF Core.
-    /// Manages master-detail transactions and row merge.
-    /// </summary>
-    public class MarketingTeamRepository : IMarketingTeamRepository
+    private readonly SalesMarketingDbContext _dbContext;
+
+    public MarketingTeamRepository(SalesMarketingDbContext dbContext)
     {
-        private readonly SalesMarketingDbContext _dbContext;
+        _dbContext = dbContext;
+    }
 
-        public MarketingTeamRepository(SalesMarketingDbContext dbContext)
+    /// <summary>
+    /// Retrieves a paginated, sorted list of teams with team leader name and salesman count.
+    /// </summary>
+    public async Task<PagedResultDto<MarketingTeamListDto>> GetPagedTeamsAsync(MarketingTeamQueryParameters parameters)
+    {
+        const short activeStatus = (short)RecordStatus.Active;
+        var query = _dbContext.MarketingTeams.AsNoTracking().AsQueryable();
+
+        if (!string.IsNullOrWhiteSpace(parameters.Search))
         {
-            _dbContext = dbContext;
+            var escaped = SearchHelper.EscapeLikePattern(parameters.Search.Trim());
+            var pattern = $"%{escaped}%";
+            query = query.Where(t =>
+                EF.Functions.ILike(t.TeamCode, pattern, @"\") ||
+                EF.Functions.ILike(t.TeamName, pattern, @"\"));
         }
 
-        /// <summary>
-        /// Retrieves a paginated list of teams with team leader name and salesman count.
-        /// Implements the exact join query from Section 3.5 of the specification.
-        /// </summary>
-        public async Task<PagedResultDto<MarketingTeamListDto>> GetPagedTeamsAsync(MarketingTeamQueryParameters parameters)
+        if (parameters.Status.HasValue)
         {
-            var query = _dbContext.Marketingteams
-                .AsNoTracking()
-                .AsQueryable();
+            query = query.Where(t => t.Status == parameters.Status.Value);
+        }
 
-            // Search filter by team code or team name
-            if (!string.IsNullOrWhiteSpace(parameters.Search))
+        var totalCount = await query.CountAsync();
+
+        var isDesc = string.Equals(parameters.SortDir, "desc", StringComparison.OrdinalIgnoreCase);
+        var sortBy = (parameters.SortBy ?? "teamcode").Trim().ToLowerInvariant();
+
+        query = (sortBy, isDesc) switch
+        {
+            ("teamname", false) => query.OrderBy(t => t.TeamName).ThenBy(t => t.TeamCode),
+            ("teamname", true) => query.OrderByDescending(t => t.TeamName).ThenBy(t => t.TeamCode),
+            ("teamleadername", false) => query.OrderBy(t => t.TeamLeader.SalesmanName).ThenBy(t => t.TeamCode),
+            ("teamleadername", true) => query.OrderByDescending(t => t.TeamLeader.SalesmanName).ThenBy(t => t.TeamCode),
+            ("salesmancount", false) => query.OrderBy(t => t.Status == activeStatus
+                ? t.MarketingTeamDetails.Count(d => d.Status == activeStatus)
+                : t.MarketingTeamDetails.Count()).ThenBy(t => t.TeamCode),
+            ("salesmancount", true) => query.OrderByDescending(t => t.Status == activeStatus
+                ? t.MarketingTeamDetails.Count(d => d.Status == activeStatus)
+                : t.MarketingTeamDetails.Count()).ThenBy(t => t.TeamCode),
+            ("status", false) => query.OrderBy(t => t.Status).ThenBy(t => t.TeamCode),
+            ("status", true) => query.OrderByDescending(t => t.Status).ThenBy(t => t.TeamCode),
+            ("teamcode", true) => query.OrderByDescending(t => t.TeamCode),
+            _ => query.OrderBy(t => t.TeamCode)
+        };
+
+        var items = await query
+            .Skip((parameters.PageNumber - 1) * parameters.PageSize)
+            .Take(parameters.PageSize)
+            .Select(t => new MarketingTeamListDto
             {
-                var term = parameters.Search.Trim().ToLower();
-                query = query.Where(t =>
-                    EF.Functions.ILike(t.Teamcode, $"%{term}%") ||
-                    EF.Functions.ILike(t.Teamname, $"%{term}%"));
+                Id = t.Id,
+                Teamcode = t.TeamCode,
+                Teamname = t.TeamName,
+                Teamleadername = t.TeamLeader.SalesmanName,
+                Salesmancount = t.Status == activeStatus
+                    ? t.MarketingTeamDetails.Count(d => d.Status == activeStatus)
+                    : t.MarketingTeamDetails.Count(),
+                Status = t.Status
+            })
+            .ToListAsync();
+
+        return new PagedResultDto<MarketingTeamListDto>
+        {
+            Items = items,
+            TotalCount = totalCount,
+            PageNumber = parameters.PageNumber,
+            PageSize = parameters.PageSize
+        };
+    }
+
+    public async Task<MarketingTeam?> GetByIdWithDetailsAsync(long id)
+    {
+        return await _dbContext.MarketingTeams
+            .AsNoTracking()
+            .Include(t => t.TeamLeader)
+            .Include(t => t.MarketingTeamDetails)
+                .ThenInclude(d => d.Salesman)
+            .FirstOrDefaultAsync(t => t.Id == id);
+    }
+
+    public async Task<bool> CodeExistsAsync(string code, long? excludeId = null)
+    {
+        var cleanCode = code.Trim().ToUpperInvariant();
+        return await _dbContext.MarketingTeams
+            .AnyAsync(t => t.TeamCode == cleanCode && (!excludeId.HasValue || t.Id != excludeId.Value));
+    }
+
+    public async Task<MarketingTeam> CreateTeamWithMembersAsync(MarketingTeam team, List<MarketingTeamDetail> details)
+    {
+        using var transaction = await _dbContext.Database.BeginTransactionAsync();
+        try
+        {
+            _dbContext.MarketingTeams.Add(team);
+            await _dbContext.SaveChangesAsync();
+
+            foreach (var detail in details)
+            {
+                detail.MarketingTeamId = team.Id;
+                _dbContext.MarketingTeamDetails.Add(detail);
             }
 
-            // Status filter (1 = Active, 2 = Inactive, null = All)
-            if (parameters.Status.HasValue)
+            await _dbContext.SaveChangesAsync();
+            await transaction.CommitAsync();
+            return team;
+        }
+        catch
+        {
+            await transaction.RollbackAsync();
+            throw;
+        }
+    }
+
+    public async Task AddTeamMemberAsync(MarketingTeamDetail detail)
+    {
+        using var transaction = await _dbContext.Database.BeginTransactionAsync();
+        try
+        {
+            var existingInactive = await _dbContext.MarketingTeamDetails
+                .FirstOrDefaultAsync(d => d.MarketingTeamId == detail.MarketingTeamId && d.SalesmanId == detail.SalesmanId);
+
+            if (existingInactive != null)
             {
-                query = query.Where(t => t.Status == parameters.Status.Value);
+                existingInactive.Role = detail.Role;
+                existingInactive.TargetAmount = detail.TargetAmount;
+                existingInactive.Status = detail.Status;
+            }
+            else
+            {
+                _dbContext.MarketingTeamDetails.Add(detail);
             }
 
-            var totalCount = await query.CountAsync();
+            await _dbContext.SaveChangesAsync();
+            await transaction.CommitAsync();
+        }
+        catch
+        {
+            await transaction.RollbackAsync();
+            throw;
+        }
+    }
 
-            var items = await query
-                .OrderBy(t => t.Teamcode)
-                .Skip((parameters.PageNumber - 1) * parameters.PageSize)
-                .Take(parameters.PageSize)
-                .Select(t => new MarketingTeamListDto
+    /// <summary>
+    /// Updates a marketing team header and merges member rows in a single transaction (Rule R10).
+    /// Removed rows are marked Inactive to preserve membership history (H15).
+    /// </summary>
+    public async Task UpdateTeamWithMembersAsync(long teamId, UpdateMarketingTeamDto dto)
+    {
+        using var transaction = await _dbContext.Database.BeginTransactionAsync();
+        try
+        {
+            var team = await _dbContext.MarketingTeams
+                .Include(t => t.MarketingTeamDetails)
+                .FirstOrDefaultAsync(t => t.Id == teamId);
+
+            if (team == null)
+            {
+                throw new KeyNotFoundException($"Team with ID {teamId} not found.");
+            }
+
+            team.TeamName = dto.Teamname.Trim();
+            team.TeamLeaderId = dto.Teamleaderid;
+            team.Description = dto.Description?.Trim();
+
+            var existingDetails = team.MarketingTeamDetails.ToList();
+            var incomingMembers = dto.Members;
+
+            var incomingExistingIds = incomingMembers
+                .Where(m => m.Id.HasValue && m.Id.Value > 0)
+                .Select(m => m.Id!.Value)
+                .ToHashSet();
+
+            // Mark removed rows Inactive instead of hard deleting (H15)
+            foreach (var detail in existingDetails.Where(d => !incomingExistingIds.Contains(d.Id)))
+            {
+                detail.Status = (short)RecordStatus.Inactive;
+            }
+
+            foreach (var memberDto in incomingMembers)
+            {
+                if (memberDto.Id.HasValue && memberDto.Id.Value > 0)
                 {
-                    Id = t.Id,
-                    Teamcode = t.Teamcode,
-                    Teamname = t.Teamname,
-                    Teamleadername = t.Teamleader.Salesmanname,
-                    Salesmancount = t.Marketingteamdetails.Count(),
-                    Status = t.Status
-                })
-                .ToListAsync();
-
-            return new PagedResultDto<MarketingTeamListDto>
-            {
-                Items = items,
-                TotalCount = totalCount,
-                PageNumber = parameters.PageNumber,
-                PageSize = parameters.PageSize
-            };
-        }
-
-        /// <summary>
-        /// Gets a marketing team by ID including its team leader and all member details.
-        /// </summary>
-        public async Task<Marketingteam?> GetByIdWithDetailsAsync(long id)
-        {
-            return await _dbContext.Marketingteams
-                .AsNoTracking()
-                .Include(t => t.Teamleader)
-                .Include(t => t.Marketingteamdetails)
-                    .ThenInclude(d => d.Salesman)
-                .FirstOrDefaultAsync(t => t.Id == id);
-        }
-
-        /// <summary>
-        /// Checks whether a team code already exists (optionally excluding a given ID when updating).
-        /// </summary>
-        public async Task<bool> CodeExistsAsync(string code, long? excludeId = null)
-        {
-            var cleanCode = code.Trim().ToUpper();
-            return await _dbContext.Marketingteams
-                .AnyAsync(t => t.Teamcode.ToUpper() == cleanCode && (!excludeId.HasValue || t.Id != excludeId.Value));
-        }
-
-        /// <summary>
-        /// Creates a marketing team and all its member rows in a single database transaction (Rule R10).
-        /// </summary>
-        public async Task<Marketingteam> CreateTeamWithMembersAsync(Marketingteam team, List<Marketingteamdetail> details)
-        {
-            using var transaction = await _dbContext.Database.BeginTransactionAsync();
-            try
-            {
-                // 1. Add team header
-                _dbContext.Marketingteams.Add(team);
-                await _dbContext.SaveChangesAsync();
-
-                // 2. Link detail rows with generated team ID and insert
-                foreach (var detail in details)
-                {
-                    detail.Marketingteamid = team.Id;
-                    _dbContext.Marketingteamdetails.Add(detail);
-                }
-
-                await _dbContext.SaveChangesAsync();
-
-                // 3. Commit the transaction
-                await transaction.CommitAsync();
-
-                return team;
-            }
-            catch
-            {
-                await transaction.RollbackAsync();
-                throw;
-            }
-        }
-
-        /// <summary>
-        /// Deletes a team. The database cascade removes its detail rows.
-        /// </summary>
-        public async Task DeleteTeamAsync(long teamId)
-        {
-            using var transaction = await _dbContext.Database.BeginTransactionAsync();
-            try
-            {
-                var team = await _dbContext.Marketingteams
-                    .FirstOrDefaultAsync(t => t.Id == teamId);
-
-                if (team == null)
-                {
-                    throw new KeyNotFoundException($"Team with ID {teamId} not found.");
-                }
-
-                _dbContext.Marketingteams.Remove(team);
-                await _dbContext.SaveChangesAsync();
-                await transaction.CommitAsync();
-            }
-            catch
-            {
-                await transaction.RollbackAsync();
-                throw;
-            }
-        }
-
-        /// <summary>
-        /// Adds one salesman detail row to an existing team.
-        /// </summary>
-        public async Task AddTeamMemberAsync(Marketingteamdetail detail)
-        {
-            using var transaction = await _dbContext.Database.BeginTransactionAsync();
-            try
-            {
-                _dbContext.Marketingteamdetails.Add(detail);
-                await _dbContext.SaveChangesAsync();
-                await transaction.CommitAsync();
-            }
-            catch
-            {
-                await transaction.RollbackAsync();
-                throw;
-            }
-        }
-
-        /// <summary>
-        /// Updates a marketing team header and merges member rows in a single database transaction (Rule R10).
-        /// Removed rows are deleted, new rows inserted, and changed rows updated.
-        /// Note: Team Status is preserved — status is managed via Deactivate/Activate endpoints.
-        /// </summary>
-        public async Task UpdateTeamWithMembersAsync(long teamId, UpdateMarketingTeamDto dto)
-        {
-            using var transaction = await _dbContext.Database.BeginTransactionAsync();
-            try
-            {
-                // 1. Load the team header and current member rows
-                var team = await _dbContext.Marketingteams
-                    .Include(t => t.Marketingteamdetails)
-                    .FirstOrDefaultAsync(t => t.Id == teamId);
-
-                if (team == null)
-                {
-                    throw new KeyNotFoundException($"Team with ID {teamId} not found.");
-                }
-
-                // 2. Update header fields (Status is intentionally NOT changed here)
-                team.Teamname = dto.Teamname.Trim();
-                team.Teamleaderid = dto.Teamleaderid;
-                team.Description = dto.Description?.Trim();
-                team.Modifieddate = DateTime.UtcNow;
-
-                // 3. Row merge for detail members
-                var existingDetails = team.Marketingteamdetails.ToList();
-                var incomingMembers = dto.Members;
-
-                // Identify IDs of incoming rows that already exist
-                var incomingExistingIds = incomingMembers
-                    .Where(m => m.Id.HasValue && m.Id.Value > 0)
-                    .Select(m => m.Id!.Value)
-                    .ToHashSet();
-
-                // A) Delete removed rows (rows in DB that are not in the incoming list)
-                var rowsToDelete = existingDetails
-                    .Where(d => !incomingExistingIds.Contains(d.Id))
-                    .ToList();
-
-                foreach (var deleteRow in rowsToDelete)
-                {
-                    _dbContext.Marketingteamdetails.Remove(deleteRow);
-                }
-
-                // B) Update existing rows or insert new rows
-                foreach (var memberDto in incomingMembers)
-                {
-                    if (memberDto.Id.HasValue && memberDto.Id.Value > 0)
+                    var existingRow = existingDetails.FirstOrDefault(d => d.Id == memberDto.Id.Value);
+                    if (existingRow != null)
                     {
-                        // Update existing detail row
-                        var existingRow = existingDetails.FirstOrDefault(d => d.Id == memberDto.Id.Value);
-                        if (existingRow != null)
-                        {
-                            existingRow.Salesmanid = memberDto.Salesmanid;
-                            existingRow.Role = memberDto.Role;
-                            existingRow.Targetamount = memberDto.Targetamount;
-                            existingRow.Status = memberDto.Status;
-                        }
+                        // Do not allow changing SalesmanId on an existing row (H13)
+                        existingRow.Role = memberDto.Role;
+                        existingRow.TargetAmount = memberDto.Targetamount;
+                        existingRow.Status = memberDto.Status;
+                    }
+                }
+                else
+                {
+                    // Reactivate an existing inactive detail row for the same salesman if present
+                    var previousInactive = existingDetails.FirstOrDefault(d => d.SalesmanId == memberDto.Salesmanid);
+                    if (previousInactive != null)
+                    {
+                        previousInactive.Role = memberDto.Role;
+                        previousInactive.TargetAmount = memberDto.Targetamount;
+                        previousInactive.Status = memberDto.Status;
                     }
                     else
                     {
-                        // Insert new detail row
-                        var newDetail = new Marketingteamdetail
+                        _dbContext.MarketingTeamDetails.Add(new MarketingTeamDetail
                         {
-                            Marketingteamid = team.Id,
-                            Salesmanid = memberDto.Salesmanid,
+                            MarketingTeamId = team.Id,
+                            SalesmanId = memberDto.Salesmanid,
                             Role = memberDto.Role,
-                            Targetamount = memberDto.Targetamount,
+                            TargetAmount = memberDto.Targetamount,
                             Status = memberDto.Status
-                        };
-                        _dbContext.Marketingteamdetails.Add(newDetail);
+                        });
                     }
                 }
-
-                await _dbContext.SaveChangesAsync();
-
-                // 4. Commit the transaction
-                await transaction.CommitAsync();
             }
-            catch
-            {
-                await transaction.RollbackAsync();
-                throw;
-            }
+
+            await _dbContext.SaveChangesAsync();
+            await transaction.CommitAsync();
         }
-
-        /// <summary>
-        /// Deactivates a marketing team (status = 2) AND deactivates all its member rows in one transaction.
-        /// When the team is deactivated, every salesman in marketingteamdetail also becomes Inactive.
-        /// </summary>
-        public async Task DeactivateTeamWithMembersAsync(long teamId)
+        catch
         {
-            using var transaction = await _dbContext.Database.BeginTransactionAsync();
-            try
-            {
-                // Load team with all detail rows
-                var team = await _dbContext.Marketingteams
-                    .Include(t => t.Marketingteamdetails)
-                    .FirstOrDefaultAsync(t => t.Id == teamId);
-
-                if (team == null)
-                {
-                    throw new KeyNotFoundException($"Team with ID {teamId} not found.");
-                }
-
-                // 1. Set team header to Inactive
-                team.Status = (short)RecordStatus.Inactive;
-                team.Modifieddate = DateTime.UtcNow;
-
-                // 2. Set ALL member rows to Inactive as well
-                foreach (var detail in team.Marketingteamdetails)
-                {
-                    detail.Status = (short)RecordStatus.Inactive;
-                }
-
-                await _dbContext.SaveChangesAsync();
-                await transaction.CommitAsync();
-            }
-            catch
-            {
-                await transaction.RollbackAsync();
-                throw;
-            }
+            await transaction.RollbackAsync();
+            throw;
         }
+    }
 
-        /// <summary>
-        /// Activates a marketing team (status = 1).
-        /// Note: Member rows keep their individual status — only the team header is activated.
-        /// </summary>
-        public async Task ActivateTeamAsync(long teamId)
+    public async Task DeactivateTeamWithMembersAsync(long teamId)
+    {
+        using var transaction = await _dbContext.Database.BeginTransactionAsync();
+        try
         {
-            using var transaction = await _dbContext.Database.BeginTransactionAsync();
-            try
+            var team = await _dbContext.MarketingTeams
+                .Include(t => t.MarketingTeamDetails)
+                .FirstOrDefaultAsync(t => t.Id == teamId);
+
+            if (team == null)
             {
-                var team = await _dbContext.Marketingteams
-                    .FirstOrDefaultAsync(t => t.Id == teamId);
-
-                if (team == null)
-                {
-                    throw new KeyNotFoundException($"Team with ID {teamId} not found.");
-                }
-
-                // Set team header to Active
-                team.Status = (short)RecordStatus.Active;
-                team.Modifieddate = DateTime.UtcNow;
-
-                await _dbContext.SaveChangesAsync();
-                await transaction.CommitAsync();
+                throw new KeyNotFoundException($"Team with ID {teamId} not found.");
             }
-            catch
+
+            team.Status = (short)RecordStatus.Inactive;
+
+            foreach (var detail in team.MarketingTeamDetails)
             {
-                await transaction.RollbackAsync();
-                throw;
+                detail.Status = (short)RecordStatus.Inactive;
             }
+
+            await _dbContext.SaveChangesAsync();
+            await transaction.CommitAsync();
         }
-
-        /// <summary>
-        /// Checks if a salesman is already an active member in another active team (Rule R8).
-        /// Returns the other active team's code if found, or null if free.
-        /// </summary>
-        public async Task<string?> GetActiveTeamCodeForSalesmanAsync(long salesmanId, long? excludeTeamId = null)
+        catch
         {
-            var otherTeam = await _dbContext.Marketingteamdetails
-                .AsNoTracking()
-                .Include(d => d.Marketingteam)
-                .Where(d => d.Salesmanid == salesmanId
-                         && d.Status == 1 // Active detail member
-                         && d.Marketingteam.Status == 1 // Active team
-                         && (!excludeTeamId.HasValue || d.Marketingteamid != excludeTeamId.Value))
-                .Select(d => d.Marketingteam.Teamcode)
-                .FirstOrDefaultAsync();
-
-            return otherTeam;
+            await transaction.RollbackAsync();
+            throw;
         }
+    }
+
+    public async Task ActivateTeamAsync(long teamId)
+    {
+        using var transaction = await _dbContext.Database.BeginTransactionAsync();
+        try
+        {
+            var team = await _dbContext.MarketingTeams
+                .FirstOrDefaultAsync(t => t.Id == teamId);
+
+            if (team == null)
+            {
+                throw new KeyNotFoundException($"Team with ID {teamId} not found.");
+            }
+
+            team.Status = (short)RecordStatus.Active;
+
+            await _dbContext.SaveChangesAsync();
+            await transaction.CommitAsync();
+        }
+        catch
+        {
+            await transaction.RollbackAsync();
+            throw;
+        }
+    }
+
+    public async Task<string?> GetActiveTeamCodeForSalesmanAsync(long salesmanId, long? excludeTeamId = null)
+    {
+        var map = await GetActiveTeamCodesForSalesmenAsync(new[] { salesmanId }, excludeTeamId);
+        return map.TryGetValue(salesmanId, out var code) ? code : null;
+    }
+
+    /// <summary>
+    /// Batch-loads active team codes for all requested salesman IDs in one query (M6).
+    /// </summary>
+    public async Task<Dictionary<long, string>> GetActiveTeamCodesForSalesmenAsync(
+        IEnumerable<long> salesmanIds,
+        long? excludeTeamId = null)
+    {
+        var ids = salesmanIds.Distinct().ToList();
+        if (ids.Count == 0)
+        {
+            return new Dictionary<long, string>();
+        }
+
+        const short activeStatus = (short)RecordStatus.Active;
+
+        var activeDetails = await _dbContext.MarketingTeamDetails
+            .AsNoTracking()
+            .Where(d => ids.Contains(d.SalesmanId)
+                     && d.Status == activeStatus
+                     && d.MarketingTeam.Status == activeStatus
+                     && (!excludeTeamId.HasValue || d.MarketingTeamId != excludeTeamId.Value))
+            .Select(d => new { d.SalesmanId, d.MarketingTeam.TeamCode })
+            .ToListAsync();
+
+        var activeLeaders = await _dbContext.MarketingTeams
+            .AsNoTracking()
+            .Where(t => ids.Contains(t.TeamLeaderId)
+                     && t.Status == activeStatus
+                     && (!excludeTeamId.HasValue || t.Id != excludeTeamId.Value))
+            .Select(t => new { SalesmanId = t.TeamLeaderId, t.TeamCode })
+            .ToListAsync();
+
+        var result = new Dictionary<long, string>();
+        foreach (var entry in activeDetails.Concat(activeLeaders))
+        {
+            result.TryAdd(entry.SalesmanId, entry.TeamCode);
+        }
+
+        return result;
     }
 }

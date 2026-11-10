@@ -1,364 +1,384 @@
+using MarketingApi.Common;
 using MarketingApi.Data;
 using MarketingApi.DTOs.Common;
 using MarketingApi.DTOs.Salesman;
-using MarketingApi.Models;
+using MarketingApi.Enums;
+using MarketingApi.Models.Entities;
+using MarketingApi.Repository.Interfaces;
 using Microsoft.EntityFrameworkCore;
 
-namespace MarketingApi.Repository
-{
-    /// <summary>
-    /// Repository implementation for Salesman database operations using EF Core.
-    /// </summary>
-    public class SalesmanRepository : ISalesmanRepository
-    {
-        private readonly SalesMarketingDbContext _dbContext;
+namespace MarketingApi.Repository.Implementations;
 
-        public SalesmanRepository(SalesMarketingDbContext dbContext)
+/// <summary>
+/// Repository implementation for Salesman database operations using EF Core.
+/// </summary>
+public class SalesmanRepository : ISalesmanRepository
+{
+    private readonly SalesMarketingDbContext _dbContext;
+
+    public SalesmanRepository(SalesMarketingDbContext dbContext)
+    {
+        _dbContext = dbContext;
+    }
+
+    /// <summary>
+    /// Retrieves a paginated, sorted list of salesmen with optional search and status filter.
+    /// </summary>
+    public async Task<PagedResultDto<SalesmanListDto>> GetPagedSalesmenAsync(SalesmanQueryParameters parameters)
+    {
+        var query = _dbContext.Salesmen.AsNoTracking().AsQueryable();
+
+        if (!string.IsNullOrWhiteSpace(parameters.Search))
         {
-            _dbContext = dbContext;
+            var escaped = SearchHelper.EscapeLikePattern(parameters.Search.Trim());
+            var pattern = $"%{escaped}%";
+            query = query.Where(s =>
+                EF.Functions.ILike(s.SalesmanCode, pattern, @"\") ||
+                EF.Functions.ILike(s.SalesmanName, pattern, @"\") ||
+                (s.MobileNo != null && EF.Functions.ILike(s.MobileNo, pattern, @"\")));
         }
 
-        /// <summary>
-        /// Retrieves a paginated list of salesmen with optional search and status filter.
-        /// </summary>
-        public async Task<PagedResultDto<SalesmanListDto>> GetPagedSalesmenAsync(SalesmanQueryParameters parameters)
+        if (parameters.Status.HasValue)
         {
-            var query = _dbContext.Salesmen.AsNoTracking().AsQueryable();
+            query = query.Where(s => s.Status == parameters.Status.Value);
+        }
 
-            // Search filter by code, name, or mobile
-            if (!string.IsNullOrWhiteSpace(parameters.Search))
+        var totalCount = await query.CountAsync();
+
+        var isDesc = string.Equals(parameters.SortDir, "desc", StringComparison.OrdinalIgnoreCase);
+        var sortBy = (parameters.SortBy ?? "salesmancode").Trim().ToLowerInvariant();
+
+        query = (sortBy, isDesc) switch
+        {
+            ("salesmanname", false) => query.OrderBy(s => s.SalesmanName).ThenBy(s => s.SalesmanCode),
+            ("salesmanname", true) => query.OrderByDescending(s => s.SalesmanName).ThenBy(s => s.SalesmanCode),
+            ("mobileno", false) => query.OrderBy(s => s.MobileNo).ThenBy(s => s.SalesmanCode),
+            ("mobileno", true) => query.OrderByDescending(s => s.MobileNo).ThenBy(s => s.SalesmanCode),
+            ("email", false) => query.OrderBy(s => s.Email).ThenBy(s => s.SalesmanCode),
+            ("email", true) => query.OrderByDescending(s => s.Email).ThenBy(s => s.SalesmanCode),
+            ("joiningdate", false) => query.OrderBy(s => s.JoiningDate).ThenBy(s => s.SalesmanCode),
+            ("joiningdate", true) => query.OrderByDescending(s => s.JoiningDate).ThenBy(s => s.SalesmanCode),
+            ("status", false) => query.OrderBy(s => s.Status).ThenBy(s => s.SalesmanCode),
+            ("status", true) => query.OrderByDescending(s => s.Status).ThenBy(s => s.SalesmanCode),
+            ("salesmancode", true) => query.OrderByDescending(s => s.SalesmanCode),
+            _ => query.OrderBy(s => s.SalesmanCode)
+        };
+
+        var items = await query
+            .Skip((parameters.PageNumber - 1) * parameters.PageSize)
+            .Take(parameters.PageSize)
+            .Select(s => new SalesmanListDto
             {
-                var term = parameters.Search.Trim().ToLower();
-                query = query.Where(s =>
-                    EF.Functions.ILike(s.Salesmancode, $"%{term}%") ||
-                    EF.Functions.ILike(s.Salesmanname, $"%{term}%") ||
-                    (s.Mobileno != null && EF.Functions.ILike(s.Mobileno, $"%{term}%")));
+                Id = s.Id,
+                Salesmancode = s.SalesmanCode,
+                Salesmanname = s.SalesmanName,
+                Mobileno = s.MobileNo,
+                Email = s.Email,
+                Joiningdate = s.JoiningDate,
+                Status = s.Status,
+                Createddate = s.CreatedDate,
+                Modifieddate = s.ModifiedDate
+            })
+            .ToListAsync();
+
+        var salesmanIds = items.Select(i => i.Id).ToList();
+        var pendingStatus = nameof(DeactivationRequestStatus.Pending);
+        var pendingRequests = await _dbContext.SalesmanDeactivationRequests
+            .AsNoTracking()
+            .Where(r => r.Status == pendingStatus && salesmanIds.Contains(r.SalesmanId))
+            .ToDictionaryAsync(r => r.SalesmanId);
+
+        foreach (var item in items)
+        {
+            if (pendingRequests.TryGetValue(item.Id, out var req))
+            {
+                item.HasPendingDeactivation = true;
+                item.PendingDeactivationTeam = req.TeamCode ?? req.TeamName;
+                item.PendingDeactivationRole = req.RoleInTeam;
             }
+        }
 
-            // Status filter (1 = Active, 2 = Inactive, null = All)
-            if (parameters.Status.HasValue)
+        return new PagedResultDto<SalesmanListDto>
+        {
+            Items = items,
+            TotalCount = totalCount,
+            PageNumber = parameters.PageNumber,
+            PageSize = parameters.PageSize
+        };
+    }
+
+    public async Task<Salesman?> GetByIdAsync(long id)
+    {
+        return await _dbContext.Salesmen
+            .AsNoTracking()
+            .FirstOrDefaultAsync(s => s.Id == id);
+    }
+
+    public async Task<bool> CodeExistsAsync(string code, long? excludeId = null)
+    {
+        var cleanCode = code.Trim().ToUpperInvariant();
+        return await _dbContext.Salesmen
+            .AnyAsync(s => s.SalesmanCode == cleanCode && (!excludeId.HasValue || s.Id != excludeId.Value));
+    }
+
+    public async Task<bool> MobileExistsAsync(string mobile, long? excludeId = null)
+    {
+        if (string.IsNullOrWhiteSpace(mobile)) return false;
+        var clean = mobile.Trim();
+        return await _dbContext.Salesmen
+            .AnyAsync(s => s.MobileNo == clean && (!excludeId.HasValue || s.Id != excludeId.Value));
+    }
+
+    public async Task<bool> EmailExistsAsync(string email, long? excludeId = null)
+    {
+        if (string.IsNullOrWhiteSpace(email)) return false;
+        var clean = email.Trim().ToLowerInvariant();
+        return await _dbContext.Salesmen
+            .AnyAsync(s => s.Email == clean && (!excludeId.HasValue || s.Id != excludeId.Value));
+    }
+
+    /// <summary>
+    /// Returns active salesmen for dropdowns in a single query, enriched with current active team assignment.
+    /// </summary>
+    public async Task<List<SalesmanLookupDto>> GetActiveSalesmenLookupAsync()
+    {
+        const short activeStatus = (short)RecordStatus.Active;
+        const short leaderRole = (short)SalesmanRole.TeamLeader;
+
+        return await _dbContext.Salesmen
+            .AsNoTracking()
+            .Where(s => s.Status == activeStatus)
+            .OrderBy(s => s.SalesmanName)
+            .Select(s => new SalesmanLookupDto
             {
-                query = query.Where(s => s.Status == parameters.Status.Value);
-            }
+                Id = s.Id,
+                Salesmancode = s.SalesmanCode,
+                Salesmanname = s.SalesmanName,
+                Status = s.Status,
+                ActiveTeamId = _dbContext.MarketingTeams
+                    .Where(t => t.TeamLeaderId == s.Id && t.Status == activeStatus)
+                    .Select(t => (long?)t.Id)
+                    .FirstOrDefault()
+                    ?? _dbContext.MarketingTeamDetails
+                        .Where(d => d.SalesmanId == s.Id && d.Status == activeStatus && d.MarketingTeam.Status == activeStatus)
+                        .Select(d => (long?)d.MarketingTeamId)
+                        .FirstOrDefault(),
+                ActiveTeamCode = _dbContext.MarketingTeams
+                    .Where(t => t.TeamLeaderId == s.Id && t.Status == activeStatus)
+                    .Select(t => t.TeamCode)
+                    .FirstOrDefault()
+                    ?? _dbContext.MarketingTeamDetails
+                        .Where(d => d.SalesmanId == s.Id && d.Status == activeStatus && d.MarketingTeam.Status == activeStatus)
+                        .Select(d => d.MarketingTeam.TeamCode)
+                        .FirstOrDefault(),
+                IsLeaderInActiveTeam = _dbContext.MarketingTeams
+                    .Any(t => t.TeamLeaderId == s.Id && t.Status == activeStatus)
+                    || _dbContext.MarketingTeamDetails
+                        .Any(d => d.SalesmanId == s.Id && d.Status == activeStatus && d.MarketingTeam.Status == activeStatus && d.Role == leaderRole)
+            })
+            .ToListAsync();
+    }
 
-            var totalCount = await query.CountAsync();
+    public async Task<Salesman> CreateAsync(Salesman salesman)
+    {
+        _dbContext.Salesmen.Add(salesman);
+        await _dbContext.SaveChangesAsync();
+        return salesman;
+    }
 
-            var items = await query
-                .OrderBy(s => s.Salesmancode)
-                .Skip((parameters.PageNumber - 1) * parameters.PageSize)
-                .Take(parameters.PageSize)
-                .Select(s => new SalesmanListDto
-                {
-                    Id = s.Id,
-                    Salesmancode = s.Salesmancode,
-                    Salesmanname = s.Salesmanname,
-                    Mobileno = s.Mobileno,
-                    Email = s.Email,
-                    Joiningdate = s.Joiningdate,
-                    Status = s.Status,
-                    Createddate = s.Createddate,
-                    Modifieddate = s.Modifieddate
-                })
-                .ToListAsync();
+    public async Task UpdateAsync(Salesman salesman)
+    {
+        _dbContext.Salesmen.Update(salesman);
+        await _dbContext.SaveChangesAsync();
+    }
 
-            var salesmanIds = items.Select(i => i.Id).ToList();
-            var pendingRequests = await _dbContext.SalesmanDeactivationRequests
-                .AsNoTracking()
-                .Where(r => r.Status == "Pending" && salesmanIds.Contains(r.Salesmanid))
-                .ToDictionaryAsync(r => r.Salesmanid);
+    public async Task<List<Salesman>> GetSalesmenByIdsAsync(IEnumerable<long> ids)
+    {
+        return await _dbContext.Salesmen
+            .AsNoTracking()
+            .Where(s => ids.Contains(s.Id))
+            .ToListAsync();
+    }
 
-            foreach (var item in items)
+    public async Task<ActiveTeamAssignmentDto?> GetActiveTeamAssignmentAsync(long salesmanId)
+    {
+        const short activeStatus = (short)RecordStatus.Active;
+        const short leaderRole = (short)SalesmanRole.TeamLeader;
+
+        var leaderTeam = await _dbContext.MarketingTeams
+            .AsNoTracking()
+            .Where(t => t.TeamLeaderId == salesmanId && t.Status == activeStatus)
+            .Select(t => new ActiveTeamAssignmentDto
             {
-                if (pendingRequests.TryGetValue(item.Id, out var req))
+                TeamId = t.Id,
+                TeamCode = t.TeamCode,
+                TeamName = t.TeamName,
+                RoleType = TeamRoleType.Leader
+            })
+            .FirstOrDefaultAsync();
+
+        if (leaderTeam != null)
+        {
+            return leaderTeam;
+        }
+
+        return await _dbContext.MarketingTeamDetails
+            .AsNoTracking()
+            .Where(d => d.SalesmanId == salesmanId && d.Status == activeStatus && d.MarketingTeam.Status == activeStatus)
+            .Select(d => new ActiveTeamAssignmentDto
+            {
+                TeamId = d.MarketingTeamId,
+                TeamCode = d.MarketingTeam.TeamCode,
+                TeamName = d.MarketingTeam.TeamName,
+                RoleType = d.Role == leaderRole ? TeamRoleType.Leader : TeamRoleType.Member
+            })
+            .FirstOrDefaultAsync();
+    }
+
+    public async Task<SalesmanDeactivationRequest> CreateDeactivationRequestAsync(SalesmanDeactivationRequest request)
+    {
+        _dbContext.SalesmanDeactivationRequests.Add(request);
+        await _dbContext.SaveChangesAsync();
+        return request;
+    }
+
+    public async Task<List<SalesmanDeactivationRequest>> GetPendingDeactivationRequestsAsync()
+    {
+        var pendingStatus = nameof(DeactivationRequestStatus.Pending);
+        return await _dbContext.SalesmanDeactivationRequests
+            .AsNoTracking()
+            .Where(r => r.Status == pendingStatus)
+            .OrderByDescending(r => r.RequestedDate)
+            .ToListAsync();
+    }
+
+    public async Task<SalesmanDeactivationRequest?> GetDeactivationRequestByIdAsync(long id)
+    {
+        return await _dbContext.SalesmanDeactivationRequests
+            .FirstOrDefaultAsync(r => r.Id == id);
+    }
+
+    public async Task UpdateDeactivationRequestAsync(SalesmanDeactivationRequest request)
+    {
+        _dbContext.SalesmanDeactivationRequests.Update(request);
+        await _dbContext.SaveChangesAsync();
+    }
+
+    public async Task<SalesmanDeactivationRequest?> GetPendingRequestForSalesmanAsync(long salesmanId)
+    {
+        var pendingStatus = nameof(DeactivationRequestStatus.Pending);
+        return await _dbContext.SalesmanDeactivationRequests
+            .AsNoTracking()
+            .FirstOrDefaultAsync(r => r.SalesmanId == salesmanId && r.Status == pendingStatus);
+    }
+
+    /// <summary>
+    /// Atomically deactivates the salesman, updates their current team/member status, and approves the request in one transaction.
+    /// </summary>
+    public async Task<SalesmanDeactivationRequest> ApproveDeactivationAtomicallyAsync(
+        SalesmanDeactivationRequest request,
+        Salesman salesman,
+        ActiveTeamAssignmentDto? currentAssignment,
+        string processedBy)
+    {
+        using var transaction = await _dbContext.Database.BeginTransactionAsync();
+        try
+        {
+            const short inactiveStatus = (short)RecordStatus.Inactive;
+
+            if (currentAssignment != null)
+            {
+                request.TeamId = currentAssignment.TeamId;
+                request.TeamCode = currentAssignment.TeamCode;
+                request.TeamName = currentAssignment.TeamName;
+                request.RoleInTeam = currentAssignment.RoleInTeam;
+
+                if (currentAssignment.RoleType == TeamRoleType.Leader)
                 {
-                    item.HasPendingDeactivation = true;
-                    item.PendingDeactivationTeam = req.Teamcode ?? req.Teamname;
-                    item.PendingDeactivationRole = req.Roleinteam;
+                    var team = await _dbContext.MarketingTeams
+                        .FirstOrDefaultAsync(t => t.Id == currentAssignment.TeamId);
+                    if (team != null)
+                    {
+                        team.Status = inactiveStatus;
+                    }
+
+                    var details = await _dbContext.MarketingTeamDetails
+                        .Where(d => d.MarketingTeamId == currentAssignment.TeamId)
+                        .ToListAsync();
+
+                    foreach (var detail in details)
+                    {
+                        detail.Status = inactiveStatus;
+                    }
+                }
+                else
+                {
+                    var details = await _dbContext.MarketingTeamDetails
+                        .Where(d => d.MarketingTeamId == currentAssignment.TeamId && d.SalesmanId == salesman.Id)
+                        .ToListAsync();
+
+                    foreach (var detail in details)
+                    {
+                        detail.Status = inactiveStatus;
+                    }
+
+                    var team = await _dbContext.MarketingTeams
+                        .FirstOrDefaultAsync(t => t.Id == currentAssignment.TeamId);
+                    if (team != null)
+                    {
+                        _dbContext.Entry(team).State = EntityState.Modified;
+                    }
                 }
             }
 
-            return new PagedResultDto<SalesmanListDto>
-            {
-                Items = items,
-                TotalCount = totalCount,
-                PageNumber = parameters.PageNumber,
-                PageSize = parameters.PageSize
-            };
-        }
+            // Attach untracked salesman from GetByIdAsync and deactivate
+            _dbContext.Salesmen.Attach(salesman);
+            salesman.Status = inactiveStatus;
 
-        /// <summary>
-        /// Gets a salesman by ID.
-        /// </summary>
-        public async Task<Salesman?> GetByIdAsync(long id)
-        {
-            return await _dbContext.Salesmen
-                .AsNoTracking()
-                .FirstOrDefaultAsync(s => s.Id == id);
-        }
+            request.Status = nameof(DeactivationRequestStatus.Approved);
+            request.ProcessedDate = DateTime.UtcNow;
+            request.ProcessedBy = processedBy;
 
-        /// <summary>
-        /// Gets a salesman by unique code.
-        /// </summary>
-        public async Task<Salesman?> GetByCodeAsync(string code)
-        {
-            var cleanCode = code.Trim().ToUpper();
-            return await _dbContext.Salesmen
-                .AsNoTracking()
-                .FirstOrDefaultAsync(s => s.Salesmancode.ToUpper() == cleanCode);
-        }
-
-        /// <summary>
-        /// Checks whether a salesman code already exists (optionally excluding a given ID when updating).
-        /// </summary>
-        public async Task<bool> CodeExistsAsync(string code, long? excludeId = null)
-        {
-            var cleanCode = code.Trim().ToUpper();
-            return await _dbContext.Salesmen
-                .AnyAsync(s => s.Salesmancode.ToUpper() == cleanCode && (!excludeId.HasValue || s.Id != excludeId.Value));
-        }
-
-        /// <summary>
-        /// Checks whether a mobile number already exists (optionally excluding a given ID when updating).
-        /// </summary>
-        public async Task<bool> MobileExistsAsync(string mobile, long? excludeId = null)
-        {
-            if (string.IsNullOrWhiteSpace(mobile)) return false;
-            var clean = mobile.Trim();
-            return await _dbContext.Salesmen
-                .AnyAsync(s => s.Mobileno != null && s.Mobileno.Trim() == clean && (!excludeId.HasValue || s.Id != excludeId.Value));
-        }
-
-        /// <summary>
-        /// Checks whether an email address already exists (case-insensitive, optionally excluding a given ID).
-        /// </summary>
-        public async Task<bool> EmailExistsAsync(string email, long? excludeId = null)
-        {
-            if (string.IsNullOrWhiteSpace(email)) return false;
-            var clean = email.Trim().ToLower();
-            return await _dbContext.Salesmen
-                .AnyAsync(s => s.Email != null && s.Email.Trim().ToLower() == clean && (!excludeId.HasValue || s.Id != excludeId.Value));
-        }
-
-        /// <summary>
-        /// Returns active salesmen (Status = 1) for dropdowns, enriched with their current active team assignment if any.
-        /// </summary>
-        public async Task<List<SalesmanLookupDto>> GetActiveSalesmenLookupAsync()
-        {
-            var activeAssignments = await _dbContext.Marketingteamdetails
-                .AsNoTracking()
-                .Include(d => d.Marketingteam)
-                .Where(d => d.Status == 1 && d.Marketingteam.Status == 1)
-                .Select(d => new
-                {
-                    d.Salesmanid,
-                    d.Marketingteamid,
-                    Teamcode = d.Marketingteam.Teamcode,
-                    IsLeader = d.Role == 1
-                })
-                .ToListAsync();
-
-            var activeTeamLeaders = await _dbContext.Marketingteams
-                .AsNoTracking()
-                .Where(t => t.Status == 1)
-                .Select(t => new
-                {
-                    Salesmanid = t.Teamleaderid,
-                    Marketingteamid = t.Id,
-                    Teamcode = t.Teamcode,
-                    IsLeader = true
-                })
-                .ToListAsync();
-
-            var assignmentMap = activeAssignments
-                .Concat(activeTeamLeaders)
-                .GroupBy(a => a.Salesmanid)
-                .ToDictionary(g => g.Key, g => g.OrderByDescending(x => x.IsLeader).First());
-
-            var salesmen = await _dbContext.Salesmen
-                .AsNoTracking()
-                .Where(s => s.Status == 1) // 1 = Active
-                .OrderBy(s => s.Salesmanname)
-                .ToListAsync();
-
-            return salesmen.Select(s =>
-            {
-                assignmentMap.TryGetValue(s.Id, out var assignment);
-                return new SalesmanLookupDto
-                {
-                    Id = s.Id,
-                    Salesmancode = s.Salesmancode,
-                    Salesmanname = s.Salesmanname,
-                    Status = s.Status,
-                    ActiveTeamId = assignment?.Marketingteamid,
-                    ActiveTeamCode = assignment?.Teamcode,
-                    IsLeaderInActiveTeam = assignment?.IsLeader ?? false
-                };
-            }).ToList();
-        }
-
-        /// <summary>
-        /// Inserts a new salesman record.
-        /// </summary>
-        public async Task<Salesman> CreateAsync(Salesman salesman)
-        {
-            _dbContext.Salesmen.Add(salesman);
             await _dbContext.SaveChangesAsync();
-            return salesman;
-        }
-
-        /// <summary>
-        /// Updates an existing salesman record.
-        /// </summary>
-        public async Task UpdateAsync(Salesman salesman)
-        {
-            _dbContext.Salesmen.Update(salesman);
-            await _dbContext.SaveChangesAsync();
-        }
-
-        /// <summary>
-        /// Deletes a salesman record.
-        /// </summary>
-        public async Task DeleteAsync(Salesman salesman)
-        {
-            _dbContext.Salesmen.Remove(salesman);
-            await _dbContext.SaveChangesAsync();
-        }
-
-        /// <summary>
-        /// Checks if a salesman is assigned to any team (as team leader or team detail row).
-        /// Used for Rule R2: Salesman cannot be deleted if assigned to a team.
-        /// </summary>
-        public async Task<bool> IsAssignedToAnyTeamAsync(long salesmanId)
-        {
-            var isLeader = await _dbContext.Marketingteams.AnyAsync(t => t.Teamleaderid == salesmanId);
-            if (isLeader) return true;
-
-            var isDetailMember = await _dbContext.Marketingteamdetails.AnyAsync(d => d.Salesmanid == salesmanId);
-            return isDetailMember;
-        }
-
-        /// <summary>
-        /// Gets a list of salesmen by their IDs (used for validation).
-        /// </summary>
-        public async Task<List<Salesman>> GetSalesmenByIdsAsync(IEnumerable<long> ids)
-        {
-            return await _dbContext.Salesmen
-                .AsNoTracking()
-                .Where(s => ids.Contains(s.Id))
-                .ToListAsync();
-        }
-
-        /// <summary>
-        /// Gets the active marketing team assignment for a salesman (as leader or member).
-        /// </summary>
-        public async Task<ActiveTeamAssignmentDto?> GetActiveTeamAssignmentAsync(long salesmanId)
-        {
-            // Check if leader of active team
-            var leaderTeam = await _dbContext.Marketingteams
-                .AsNoTracking()
-                .Where(t => t.Teamleaderid == salesmanId && t.Status == 1)
-                .Select(t => new ActiveTeamAssignmentDto
-                {
-                    TeamId = t.Id,
-                    TeamCode = t.Teamcode,
-                    TeamName = t.Teamname,
-                    RoleInTeam = "Leader"
-                })
-                .FirstOrDefaultAsync();
-
-            if (leaderTeam != null) return leaderTeam;
-
-            // Check if member of active team
-            var memberTeam = await _dbContext.Marketingteamdetails
-                .AsNoTracking()
-                .Include(d => d.Marketingteam)
-                .Where(d => d.Salesmanid == salesmanId && d.Status == 1 && d.Marketingteam.Status == 1)
-                .Select(d => new ActiveTeamAssignmentDto
-                {
-                    TeamId = d.Marketingteamid,
-                    TeamCode = d.Marketingteam.Teamcode,
-                    TeamName = d.Marketingteam.Teamname,
-                    RoleInTeam = d.Role == 1 ? "Leader" : "Member"
-                })
-                .FirstOrDefaultAsync();
-
-            return memberTeam;
-        }
-
-        public async Task<SalesmanDeactivationRequest> CreateDeactivationRequestAsync(SalesmanDeactivationRequest request)
-        {
-            _dbContext.SalesmanDeactivationRequests.Add(request);
-            await _dbContext.SaveChangesAsync();
+            await transaction.CommitAsync();
             return request;
         }
-
-        public async Task<List<SalesmanDeactivationRequest>> GetPendingDeactivationRequestsAsync()
+        catch
         {
-            return await _dbContext.SalesmanDeactivationRequests
-                .AsNoTracking()
-                .Where(r => r.Status == "Pending")
-                .OrderByDescending(r => r.Requesteddate)
-                .ToListAsync();
+            await transaction.RollbackAsync();
+            throw;
         }
+    }
 
-        public async Task<SalesmanDeactivationRequest?> GetDeactivationRequestByIdAsync(long id)
+    public async Task ActivateSalesmanAndCancelPendingRequestsAsync(Salesman salesman, string processedBy)
+    {
+        using var transaction = await _dbContext.Database.BeginTransactionAsync();
+        try
         {
-            return await _dbContext.SalesmanDeactivationRequests
-                .FirstOrDefaultAsync(r => r.Id == id);
-        }
+            _dbContext.Salesmen.Attach(salesman);
+            salesman.Status = (short)RecordStatus.Active;
 
-        public async Task UpdateDeactivationRequestAsync(SalesmanDeactivationRequest request)
-        {
-            _dbContext.SalesmanDeactivationRequests.Update(request);
-            await _dbContext.SaveChangesAsync();
-        }
-
-        public async Task<SalesmanDeactivationRequest?> GetPendingRequestForSalesmanAsync(long salesmanId)
-        {
-            return await _dbContext.SalesmanDeactivationRequests
-                .AsNoTracking()
-                .FirstOrDefaultAsync(r => r.Salesmanid == salesmanId && r.Status == "Pending");
-        }
-
-        public async Task DeactivateTeamAndMembersAsync(long teamId)
-        {
-            var team = await _dbContext.Marketingteams.FirstOrDefaultAsync(t => t.Id == teamId);
-            if (team != null)
-            {
-                team.Status = 2; // Inactive
-                team.Modifieddate = DateTime.UtcNow;
-            }
-
-            var details = await _dbContext.Marketingteamdetails
-                .Where(d => d.Marketingteamid == teamId)
+            var pendingStatus = nameof(DeactivationRequestStatus.Pending);
+            var openRequests = await _dbContext.SalesmanDeactivationRequests
+                .Where(r => r.SalesmanId == salesman.Id && r.Status == pendingStatus)
                 .ToListAsync();
 
-            foreach (var d in details)
+            var now = DateTime.UtcNow;
+            foreach (var openRequest in openRequests)
             {
-                d.Status = 2; // Inactive
+                openRequest.Status = nameof(DeactivationRequestStatus.Cancelled);
+                openRequest.ProcessedDate = now;
+                openRequest.ProcessedBy = processedBy;
+                openRequest.Notes = "Cancelled automatically when salesman was activated.";
             }
 
             await _dbContext.SaveChangesAsync();
+            await transaction.CommitAsync();
         }
-
-        public async Task DeactivateTeamMemberAsync(long teamId, long salesmanId)
+        catch
         {
-            var details = await _dbContext.Marketingteamdetails
-                .Where(d => d.Marketingteamid == teamId && d.Salesmanid == salesmanId)
-                .ToListAsync();
-
-            foreach (var d in details)
-            {
-                d.Status = 2; // Inactive
-            }
-
-            var team = await _dbContext.Marketingteams.FirstOrDefaultAsync(t => t.Id == teamId);
-            if (team != null)
-            {
-                team.Modifieddate = DateTime.UtcNow;
-            }
-
-            await _dbContext.SaveChangesAsync();
+            await transaction.RollbackAsync();
+            throw;
         }
     }
 }

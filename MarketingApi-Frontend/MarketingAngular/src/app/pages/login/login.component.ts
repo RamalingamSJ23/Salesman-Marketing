@@ -1,26 +1,30 @@
 import { CommonModule } from '@angular/common';
-import { Component, inject, ChangeDetectorRef } from '@angular/core';
+import { Component, DestroyRef, inject, signal } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { Router } from '@angular/router';
+import { finalize } from 'rxjs';
 import { AuthService } from '../../services/auth.service';
 import { ToastService } from '../../services/toast.service';
+import { readApiError } from '../../shared/api-error';
 
 @Component({
   selector: 'app-login',
   standalone: true,
   imports: [CommonModule, ReactiveFormsModule],
   templateUrl: './login.component.html',
+  styleUrl: './login.component.css',
 })
 export class LoginComponent {
   private readonly fb = inject(FormBuilder);
   private readonly auth = inject(AuthService);
   private readonly router = inject(Router);
   private readonly toast = inject(ToastService);
-  private readonly cdr = inject(ChangeDetectorRef);
+  private readonly destroyRef = inject(DestroyRef);
 
-  showPassword = false;
-  errorMessage = '';
-  loading = false;
+  readonly showPassword = signal(false);
+  readonly errorMessage = signal('');
+  readonly loading = signal(false);
 
   readonly form = this.fb.nonNullable.group({
     username: ['', [Validators.required, Validators.minLength(3), Validators.pattern(/^[a-zA-Z0-9._-]+$/)]],
@@ -28,32 +32,33 @@ export class LoginComponent {
   });
 
   submit(): void {
-    this.errorMessage = '';
+    this.errorMessage.set('');
     if (this.form.invalid) {
       this.form.markAllAsTouched();
-      this.cdr.markForCheck();
       return;
     }
 
-    this.loading = true;
-    this.cdr.markForCheck();
+    this.loading.set(true);
     const value = this.form.getRawValue();
 
-    this.auth.login({ username: value.username.trim(), password: value.password }).subscribe({
-      next: (response) => {
-        this.loading = false;
-        this.toast.success(`Welcome back, ${response.name || response.username}!`, 'Signed In');
-        this.router.navigateByUrl(this.auth.getDefaultRoute());
-      },
-      error: (error) => {
-        this.loading = false;
-        this.errorMessage = error?.error?.message || 'Invalid username or password. Please check your credentials.';
-        this.cdr.markForCheck();
-      },
-    });
+    this.auth
+      .login({ username: value.username.trim(), password: value.password })
+      .pipe(
+        finalize(() => this.loading.set(false)),
+        takeUntilDestroyed(this.destroyRef)
+      )
+      .subscribe({
+        next: (response) => {
+          this.toast.success(`Welcome back, ${response.name || response.username}!`, 'Signed In');
+          this.router.navigateByUrl(this.auth.getDefaultRoute());
+        },
+        error: (error) => {
+          this.errorMessage.set(readApiError(error, 'Invalid username or password. Please check your credentials.'));
+        },
+      });
   }
 
   togglePassword(): void {
-    this.showPassword = !this.showPassword;
+    this.showPassword.update((v) => !v);
   }
 }

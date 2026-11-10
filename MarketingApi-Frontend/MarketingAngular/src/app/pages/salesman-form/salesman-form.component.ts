@@ -1,25 +1,37 @@
 import { CommonModule } from '@angular/common';
-import { Component, OnInit, inject, ChangeDetectorRef } from '@angular/core';
-import { AbstractControl, FormBuilder, ReactiveFormsModule, ValidationErrors, Validators } from '@angular/forms';
+import { Component, DestroyRef, OnInit, computed, effect, inject, input, output, signal } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { finalize, timeout } from 'rxjs';
 import { DatePickerModule } from '@syncfusion/ej2-angular-calendars';
 import { DropDownListModule } from '@syncfusion/ej2-angular-dropdowns';
 import { SalesmanApiService } from '../../services/salesman-api.service';
 import { ToastService } from '../../services/toast.service';
-import { Salesman } from '../../shared/models';
+import { RecordStatus, Salesman } from '../../models';
+import { parseApiError } from '../../shared/api-error';
+import {
+  VALIDATION_PATTERNS,
+  getControlErrorMessage,
+  noFutureDateValidator,
+  normalizeEmail,
+} from '../../shared/validation';
 
-function noFutureDateValidator(control: AbstractControl): ValidationErrors | null {
-  if (!control.value) return null;
-  const selected = new Date(control.value);
-  if (isNaN(selected.getTime())) return null;
-  const today = new Date();
-  today.setHours(23, 59, 59, 999);
-  if (selected > today) {
-    return { futureDate: true };
-  }
-  return null;
-}
+const REQUIRED_LABELS: Record<string, string> = {
+  salesmancode: 'Salesman code is required.',
+  salesmanname: 'Salesman name is required.',
+  mobileno: 'Mobile number is required.',
+  email: 'Email is required.',
+  joiningdate: 'Joining date is required.',
+  status: 'Status is required.',
+};
+
+const PATTERN_MESSAGES: Record<string, string> = {
+  salesmancode: 'Only alphanumeric characters (A-Z, 0-9) are allowed.',
+  salesmanname: 'Salesman name contains unsupported characters.',
+  mobileno: 'Mobile number must be 7 to 15 digits.',
+  email: 'Enter a valid email address (e.g. name@company.com).',
+};
 
 @Component({
   selector: 'app-salesman-form',
@@ -33,7 +45,13 @@ export class SalesmanFormComponent implements OnInit {
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
   private readonly toast = inject(ToastService);
-  private readonly cdr = inject(ChangeDetectorRef);
+  private readonly destroyRef = inject(DestroyRef);
+
+  readonly modalMode = input(false);
+  readonly salesmanId = input<number | null>(null);
+  readonly initialSalesman = input<Salesman | null>(null);
+  readonly saved = output<Salesman>();
+  readonly cancelled = output<void>();
 
   readonly form = this.fb.nonNullable.group({
     salesmancode: [
@@ -42,7 +60,7 @@ export class SalesmanFormComponent implements OnInit {
         Validators.required,
         Validators.minLength(2),
         Validators.maxLength(20),
-        Validators.pattern(/^[a-zA-Z0-9]+$/),
+        Validators.pattern(VALIDATION_PATTERNS.code),
       ],
     ],
     salesmanname: [
@@ -51,88 +69,65 @@ export class SalesmanFormComponent implements OnInit {
         Validators.required,
         Validators.minLength(2),
         Validators.maxLength(100),
-        Validators.pattern(/^[a-zA-Z\s.'-]+$/),
+        Validators.pattern(VALIDATION_PATTERNS.personName),
       ],
     ],
-    mobileno: [
-      '',
-      [
-        Validators.required,
-        Validators.pattern(/^[0-9]{7,15}$/),
-      ],
-    ],
-    email: [
-      '',
-      [
-        Validators.required,
-        Validators.maxLength(100),
-        Validators.pattern(/^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$/),
-      ],
-    ],
+    mobileno: ['', [Validators.required, Validators.pattern(VALIDATION_PATTERNS.mobile)]],
+    email: ['', [Validators.required, Validators.maxLength(100), Validators.pattern(VALIDATION_PATTERNS.email)]],
     joiningdate: ['', [Validators.required, noFutureDateValidator]],
-    status: [1, Validators.required],
+    status: [RecordStatus.Active as number, Validators.required],
   });
 
-  statusOptions = [
-    { text: 'Active', value: 1 },
-    { text: 'Inactive', value: 2 },
+  readonly statusOptions = [
+    { text: 'Active', value: RecordStatus.Active },
+    { text: 'Inactive', value: RecordStatus.Inactive },
   ];
-  statusFields = { text: 'text', value: 'value' };
-
-  id: number | null = null;
-  salesman: Salesman | null = null;
-  codeConflictError = '';
-  mobileConflictError = '';
-  emailConflictError = '';
-  generalError = '';
-  saving = false;
-  loading = false;
+  readonly statusFields = { text: 'text', value: 'value' };
   readonly maxJoiningDate = new Date();
 
-  get editMode(): boolean {
-    return this.id !== null;
+  readonly resolvedId = signal<number | null>(null);
+  readonly editMode = computed(() => this.resolvedId() !== null);
+  readonly codeConflictError = signal('');
+  readonly mobileConflictError = signal('');
+  readonly emailConflictError = signal('');
+  readonly generalError = signal('');
+  readonly saving = signal(false);
+  readonly loading = signal(false);
+
+  constructor() {
+    effect(() => {
+      if (!this.modalMode()) return;
+      const incoming = this.initialSalesman();
+      const id = this.salesmanId();
+      this.resetErrors();
+
+      if (incoming) {
+        this.resolvedId.set(incoming.id);
+        this.patchForm(incoming);
+      } else if (id) {
+        this.resolvedId.set(id);
+        this.fetchById(id);
+      } else {
+        this.resolvedId.set(null);
+        this.resetForm();
+      }
+    });
   }
 
   ngOnInit(): void {
-    const paramId = this.route.snapshot.paramMap.get('id');
-    if (!paramId) {
-      this.loading = false;
-      this.cdr.markForCheck();
+    if (this.modalMode()) {
       return;
     }
 
-    this.id = Number(paramId);
-    this.loading = true;
-    this.cdr.markForCheck();
+    const paramId = this.route.snapshot.paramMap.get('id');
+    if (!paramId) {
+      this.loading.set(false);
+      return;
+    }
 
-    this.api
-      .getById(this.id)
-      .pipe(
-        timeout(8000),
-        finalize(() => {
-          this.loading = false;
-          this.cdr.markForCheck();
-        })
-      )
-      .subscribe({
-        next: (salesman) => {
-          this.salesman = salesman;
-          this.form.patchValue({
-            salesmancode: salesman.salesmancode,
-            salesmanname: salesman.salesmanname,
-            mobileno: salesman.mobileno || '',
-            email: salesman.email || '',
-            joiningdate: salesman.joiningdate ? salesman.joiningdate.slice(0, 10) : '',
-            status: salesman.status,
-          });
-          this.cdr.markForCheck();
-        },
-        error: (error) => {
-          this.generalError = this.readError(error);
-          this.toast.error(this.generalError, 'Not Found');
-          this.cdr.markForCheck();
-        },
-      });
+    const id = Number(paramId);
+    this.resolvedId.set(id);
+    this.fetchById(id);
   }
 
   onCodeInput(): void {
@@ -140,150 +135,19 @@ export class SalesmanFormComponent implements OnInit {
     if (current) {
       this.form.controls.salesmancode.setValue(current.toUpperCase(), { emitEvent: false });
     }
-    this.codeConflictError = '';
+    this.codeConflictError.set('');
   }
 
   onMobileInput(): void {
-    this.mobileConflictError = '';
+    this.mobileConflictError.set('');
   }
 
   onEmailInput(): void {
-    this.emailConflictError = '';
+    this.emailConflictError.set('');
   }
 
   getErrorMessage(field: string): string {
-    const control = this.form.get(field);
-    if (!control || !control.errors || !control.touched) return '';
-
-    if (control.hasError('required')) {
-      switch (field) {
-        case 'salesmancode': return 'Salesman code is required.';
-        case 'salesmanname': return 'Salesman name is required.';
-        case 'mobileno': return 'Mobile number is required.';
-        case 'email': return 'Email is required.';
-        case 'joiningdate': return 'Joining date is required.';
-        case 'status': return 'Status is required.';
-        default: return 'This field is required.';
-      }
-    }
-    if (control.hasError('minlength')) {
-      return `Must be at least ${control.errors['minlength'].requiredLength} characters.`;
-    }
-    if (control.hasError('maxlength')) {
-      return `Cannot exceed ${control.errors['maxlength'].requiredLength} characters.`;
-    }
-    if (control.hasError('pattern')) {
-      switch (field) {
-        case 'salesmancode': return 'Only letters and numbers (A-Z, 0-9) are allowed, with no spaces.';
-        case 'salesmanname': return 'Only English letters (A-Z, a-z), spaces, and standard characters (., -, \') are allowed.';
-        case 'mobileno': return 'Mobile number must be between 7 and 15 digits.';
-        case 'email':
-          if (control.value && /[A-Z]/.test(control.value)) {
-            return 'Capital letters are not allowed in email. Use lowercase only.';
-          }
-          return 'Please enter a valid email address in lowercase (e.g. name@company.com).';
-        default: return 'Invalid format.';
-      }
-    }
-    if (control.hasError('futureDate')) {
-      return 'Joining date cannot be in the future.';
-    }
-    return 'Invalid value.';
-  }
-
-  save(saveAndNew = false): void {
-    this.codeConflictError = '';
-    this.mobileConflictError = '';
-    this.emailConflictError = '';
-    this.generalError = '';
-
-    if (this.form.invalid) {
-      this.form.markAllAsTouched();
-      this.toast.warning('Please fix validation errors before saving.');
-      this.cdr.markForCheck();
-      return;
-    }
-
-    const value = this.form.getRawValue();
-
-    if (value.email && /[A-Z]/.test(value.email)) {
-      this.emailConflictError = 'Capital letters are not allowed in email. Use lowercase only.';
-      this.toast.error(this.emailConflictError, 'Validation Error');
-      this.cdr.markForCheck();
-      return;
-    }
-
-    this.saving = true;
-
-    const request = this.editMode
-      ? this.api.update(this.id!, {
-          salesmanname: value.salesmanname.trim(),
-          mobileno: value.mobileno?.trim() || undefined,
-          email: value.email?.trim() || undefined,
-          joiningdate: value.joiningdate || undefined,
-        })
-      : this.api.create({
-          salesmancode: value.salesmancode.trim().toUpperCase(),
-          salesmanname: value.salesmanname.trim(),
-          mobileno: value.mobileno?.trim() || undefined,
-          email: value.email?.trim() || undefined,
-          joiningdate: value.joiningdate || undefined,
-          status: Number(value.status),
-        });
-
-    request
-      .pipe(
-        timeout(10000),
-        finalize(() => {
-          this.saving = false;
-          this.cdr.markForCheck();
-        })
-      )
-      .subscribe({
-        next: (saved) => {
-          this.toast.success(
-            this.editMode
-              ? `Salesman ${saved.salesmancode} updated successfully.`
-              : `Salesman ${saved.salesmancode} created successfully.`
-          );
-
-          if (saveAndNew) {
-            this.form.reset({
-              salesmancode: '',
-              salesmanname: '',
-              mobileno: '',
-              email: '',
-              joiningdate: '',
-              status: 1,
-            });
-            this.codeConflictError = '';
-            this.mobileConflictError = '';
-            this.emailConflictError = '';
-            this.cdr.markForCheck();
-          } else {
-            // Spec: Save on a form returns to its list
-            this.router.navigate(['/salesman']);
-          }
-        },
-        error: (error) => {
-          const msg = this.readError(error);
-          const lower = msg.toLowerCase();
-          if (lower.includes('mobile')) {
-            this.mobileConflictError = msg;
-            this.toast.error(msg, 'Mobile Conflict');
-          } else if (lower.includes('email')) {
-            this.emailConflictError = msg;
-            this.toast.error(msg, 'Email Conflict');
-          } else if (error.status === 409 || lower.includes('code') || lower.includes('already exists')) {
-            this.codeConflictError = msg || `Salesman code ${value.salesmancode} already exists.`;
-            this.toast.error(this.codeConflictError, 'Code Conflict');
-          } else {
-            this.generalError = msg;
-            this.toast.error(msg, 'Save Error');
-          }
-          this.cdr.markForCheck();
-        },
-      });
+    return getControlErrorMessage(this.form, field, REQUIRED_LABELS, PATTERN_MESSAGES);
   }
 
   isInvalid(name: string): boolean {
@@ -291,7 +155,134 @@ export class SalesmanFormComponent implements OnInit {
     return !!control && control.invalid && control.touched;
   }
 
-  private readError(error: any): string {
-    return error?.error?.message || error?.message || 'The request could not be completed.';
+  save(saveAndNew = false): void {
+    this.resetErrors();
+
+    if (this.form.invalid) {
+      this.form.markAllAsTouched();
+      this.toast.warning('Please fix validation errors before saving.');
+      return;
+    }
+
+    const value = this.form.getRawValue();
+    const cleanEmail = normalizeEmail(value.email);
+    this.saving.set(true);
+
+    const request = this.editMode()
+      ? this.api.update(this.resolvedId()!, {
+          salesmanname: value.salesmanname.trim(),
+          mobileno: value.mobileno?.trim() || undefined,
+          email: cleanEmail || undefined,
+          joiningdate: value.joiningdate || undefined,
+        })
+      : this.api.create({
+          salesmancode: value.salesmancode.trim().toUpperCase(),
+          salesmanname: value.salesmanname.trim(),
+          mobileno: value.mobileno?.trim() || undefined,
+          email: cleanEmail || undefined,
+          joiningdate: value.joiningdate || undefined,
+          status: Number(value.status),
+        });
+
+    request
+      .pipe(
+        timeout(10000),
+        finalize(() => this.saving.set(false)),
+        takeUntilDestroyed(this.destroyRef)
+      )
+      .subscribe({
+        next: (savedSalesman) => {
+          this.toast.success(
+            this.editMode()
+              ? `Salesman ${savedSalesman.salesmancode} updated successfully.`
+              : `Salesman ${savedSalesman.salesmancode} created successfully.`
+          );
+
+          if (saveAndNew && !this.editMode()) {
+            this.resetForm();
+            this.saved.emit(savedSalesman);
+            return;
+          }
+
+          if (this.modalMode()) {
+            this.saved.emit(savedSalesman);
+          } else {
+            this.router.navigate(['/salesman']);
+          }
+        },
+        error: (error) => {
+          const parsed = parseApiError(error);
+          if (parsed.field === 'mobileno') {
+            this.mobileConflictError.set(parsed.message);
+            this.toast.error(parsed.message, 'Mobile Conflict');
+          } else if (parsed.field === 'email') {
+            this.emailConflictError.set(parsed.message);
+            this.toast.error(parsed.message, 'Email Conflict');
+          } else if (parsed.field === 'salesmancode') {
+            this.codeConflictError.set(parsed.message);
+            this.toast.error(parsed.message, 'Code Conflict');
+          } else {
+            this.generalError.set(parsed.message);
+            this.toast.error(parsed.message, 'Save Failed');
+          }
+        },
+      });
+  }
+
+  cancel(): void {
+    if (this.modalMode()) {
+      this.cancelled.emit();
+    } else {
+      this.router.navigate(['/salesman']);
+    }
+  }
+
+  private fetchById(id: number): void {
+    this.loading.set(true);
+    this.api
+      .getById(id)
+      .pipe(
+        timeout(8000),
+        finalize(() => this.loading.set(false)),
+        takeUntilDestroyed(this.destroyRef)
+      )
+      .subscribe({
+        next: (salesman) => this.patchForm(salesman),
+        error: (error) => {
+          const parsed = parseApiError(error, 'Failed to load salesman details.');
+          this.generalError.set(parsed.message);
+          this.toast.error(parsed.message, 'Not Found');
+        },
+      });
+  }
+
+  private patchForm(salesman: Salesman): void {
+    this.form.patchValue({
+      salesmancode: salesman.salesmancode,
+      salesmanname: salesman.salesmanname,
+      mobileno: salesman.mobileno || '',
+      email: salesman.email || '',
+      joiningdate: salesman.joiningdate ? salesman.joiningdate.slice(0, 10) : '',
+      status: salesman.status,
+    });
+  }
+
+  private resetForm(): void {
+    this.form.reset({
+      salesmancode: '',
+      salesmanname: '',
+      mobileno: '',
+      email: '',
+      joiningdate: '',
+      status: RecordStatus.Active,
+    });
+    this.resetErrors();
+  }
+
+  private resetErrors(): void {
+    this.codeConflictError.set('');
+    this.mobileConflictError.set('');
+    this.emailConflictError.set('');
+    this.generalError.set('');
   }
 }

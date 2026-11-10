@@ -1,10 +1,9 @@
-using MarketingApi.Models;
+using MarketingApi.Models.Entities;
 
-namespace MarketingApi.Service
+namespace MarketingApi.Service.Interfaces;
+
+public interface IUsersService
 {
-    public interface IUsersService
-    {
-        public Task<List<Role>> GetRoles();
-        public Task<User?> AuthenticateAsync(string username, string password);
-    }
+    Task<List<Role>> GetRoles();
+    Task<User?> AuthenticateAsync(string username, string password);
 }
