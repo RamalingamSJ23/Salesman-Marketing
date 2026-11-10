@@ -228,6 +228,11 @@ export class SalesmanListComponent implements OnInit {
     this.loadCounts();
   }
 
+  onFormSavedAndContinue(): void {
+    this.load();
+    this.loadCounts();
+  }
+
   confirmStatusToggle(salesman: Salesman): void {
     const isActivating = salesman.status === RecordStatus.Inactive;
 

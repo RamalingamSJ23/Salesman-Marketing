@@ -10,7 +10,7 @@ namespace MarketingApi.Repository.Interfaces;
 public interface ISalesmanRepository
 {
     Task<PagedResultDto<SalesmanListDto>> GetPagedSalesmenAsync(SalesmanQueryParameters parameters);
-    Task<Salesman?> GetByIdAsync(long id);
+    Task<Salesman?> GetByIdAsync(long id, bool trackChanges = false);
     Task<bool> CodeExistsAsync(string code, long? excludeId = null);
     Task<bool> MobileExistsAsync(string mobile, long? excludeId = null);
     Task<bool> EmailExistsAsync(string email, long? excludeId = null);

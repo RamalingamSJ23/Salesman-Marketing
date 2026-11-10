@@ -51,6 +51,7 @@ export class SalesmanFormComponent implements OnInit {
   readonly salesmanId = input<number | null>(null);
   readonly initialSalesman = input<Salesman | null>(null);
   readonly saved = output<Salesman>();
+  readonly savedAndContinue = output<Salesman>();
   readonly cancelled = output<void>();
 
   readonly form = this.fb.nonNullable.group({
@@ -200,7 +201,7 @@ export class SalesmanFormComponent implements OnInit {
 
           if (saveAndNew && !this.editMode()) {
             this.resetForm();
-            this.saved.emit(savedSalesman);
+            this.savedAndContinue.emit(savedSalesman);
             return;
           }
 

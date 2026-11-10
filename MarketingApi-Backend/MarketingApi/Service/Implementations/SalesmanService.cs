@@ -99,7 +99,7 @@ public class SalesmanService : ISalesmanService
 
     public async Task<ServiceResult<SalesmanDto>> UpdateSalesmanAsync(long id, UpdateSalesmanDto dto)
     {
-        var salesman = await _salesmanRepository.GetByIdAsync(id);
+        var salesman = await _salesmanRepository.GetByIdAsync(id, trackChanges: true);
         if (salesman == null)
         {
             return ServiceResult<SalesmanDto>.NotFound($"Salesman with ID {id} was not found.", "SALESMAN_NOT_FOUND");
@@ -143,7 +143,7 @@ public class SalesmanService : ISalesmanService
 
     public async Task<ServiceResult<DeactivateSalesmanResultDto>> DeactivateSalesmanAsync(long id, string requestedBy)
     {
-        var salesman = await _salesmanRepository.GetByIdAsync(id);
+        var salesman = await _salesmanRepository.GetByIdAsync(id, trackChanges: true);
         if (salesman == null)
         {
             return ServiceResult<DeactivateSalesmanResultDto>.NotFound($"Salesman with ID {id} was not found.", "SALESMAN_NOT_FOUND");
@@ -229,7 +229,7 @@ public class SalesmanService : ISalesmanService
             return ServiceResult<SalesmanDeactivationRequestDto>.BadRequest($"Request is already {request.Status}.", code: "INVALID_REQUEST_STATE");
         }
 
-        var salesman = await _salesmanRepository.GetByIdAsync(request.SalesmanId);
+        var salesman = await _salesmanRepository.GetByIdAsync(request.SalesmanId, trackChanges: true);
         if (salesman == null)
         {
             return ServiceResult<SalesmanDeactivationRequestDto>.NotFound($"Salesman with ID {request.SalesmanId} was not found.");
@@ -276,7 +276,7 @@ public class SalesmanService : ISalesmanService
 
     public async Task<ServiceResult<SalesmanDto>> ActivateSalesmanAsync(long id, string processedBy)
     {
-        var salesman = await _salesmanRepository.GetByIdAsync(id);
+        var salesman = await _salesmanRepository.GetByIdAsync(id, trackChanges: true);
         if (salesman == null)
         {
             return ServiceResult<SalesmanDto>.NotFound($"Salesman with ID {id} was not found.", "SALESMAN_NOT_FOUND");

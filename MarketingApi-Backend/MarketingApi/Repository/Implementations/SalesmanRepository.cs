@@ -107,11 +107,14 @@ public class SalesmanRepository : ISalesmanRepository
         };
     }
 
-    public async Task<Salesman?> GetByIdAsync(long id)
+    public async Task<Salesman?> GetByIdAsync(long id, bool trackChanges = false)
     {
-        return await _dbContext.Salesmen
-            .AsNoTracking()
-            .FirstOrDefaultAsync(s => s.Id == id);
+        var query = _dbContext.Salesmen.AsQueryable();
+        if (!trackChanges)
+        {
+            query = query.AsNoTracking();
+        }
+        return await query.FirstOrDefaultAsync(s => s.Id == id);
     }
 
     public async Task<bool> CodeExistsAsync(string code, long? excludeId = null)
@@ -188,7 +191,10 @@ public class SalesmanRepository : ISalesmanRepository
 
     public async Task UpdateAsync(Salesman salesman)
     {
-        _dbContext.Salesmen.Update(salesman);
+        if (_dbContext.Entry(salesman).State == EntityState.Detached)
+        {
+            _dbContext.Salesmen.Update(salesman);
+        }
         await _dbContext.SaveChangesAsync();
     }
 
@@ -331,8 +337,10 @@ public class SalesmanRepository : ISalesmanRepository
                 }
             }
 
-            // Attach untracked salesman from GetByIdAsync and deactivate
-            _dbContext.Salesmen.Attach(salesman);
+            if (_dbContext.Entry(salesman).State == EntityState.Detached)
+            {
+                _dbContext.Salesmen.Attach(salesman);
+            }
             salesman.Status = inactiveStatus;
 
             request.Status = nameof(DeactivationRequestStatus.Approved);
@@ -355,7 +363,10 @@ public class SalesmanRepository : ISalesmanRepository
         using var transaction = await _dbContext.Database.BeginTransactionAsync();
         try
         {
-            _dbContext.Salesmen.Attach(salesman);
+            if (_dbContext.Entry(salesman).State == EntityState.Detached)
+            {
+                _dbContext.Salesmen.Attach(salesman);
+            }
             salesman.Status = (short)RecordStatus.Active;
 
             var pendingStatus = nameof(DeactivationRequestStatus.Pending);
