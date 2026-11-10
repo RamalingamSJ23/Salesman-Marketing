@@ -174,7 +174,10 @@ if (app.Environment.IsDevelopment())
     app.MapGet("/", () => Results.Redirect("/swagger")).AllowAnonymous();
 }
 
-app.UseHttpsRedirection();
+if (!app.Environment.IsDevelopment())
+{
+    app.UseHttpsRedirection();
+}
 app.UseCors("Frontend");
 app.UseAuthentication();
 app.UseAuthorization();
