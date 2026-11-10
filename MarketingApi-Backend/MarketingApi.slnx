@@ -1,4 +1,3 @@
 <Solution>
   <Project Path="MarketingApi/MarketingApi.csproj" />
-  <Project Path="MarketingApi.Tests/MarketingApi.Tests.csproj" />
 </Solution>
