@@ -1,0 +1,158 @@
+<div class="page-container max-w-4xl">
+  <!-- Top Header matching Wireframe Page 7 -->
+  <div class="wireframe-header">
+    <div class="wireframe-title-wrap">
+      <h1 class="wireframe-title">{{ editMode ? 'Edit Salesman' : 'New Salesman' }}</h1>
+    </div>
+    <div class="wireframe-breadcrumb">
+      <span>Masters</span>
+      <span class="sep">/</span>
+      <a routerLink="/salesman">Salesman</a>
+      <span class="sep">/</span>
+      <span class="current">{{ editMode ? 'Edit' : 'New' }}</span>
+    </div>
+  </div>
+
+  <!-- Loading State -->
+  <div *ngIf="loading" class="content-card text-center py-8">
+    <span class="spinner-sm"></span> Loading salesman details...
+  </div>
+
+  <!-- General Error Banner -->
+  <div *ngIf="generalError && !loading" class="alert-box alert-error mb-4">
+    {{ generalError }}
+  </div>
+
+  <!-- Form Card -->
+  <div *ngIf="!loading" class="content-card p-6">
+    <form [formGroup]="form" (ngSubmit)="save()" novalidate>
+      <!-- Two-column form layout matching Wireframe Page 7 -->
+      <div class="wireframe-form-grid">
+        <!-- Row 1: Code (left) | Name (right) -->
+        <div class="form-field">
+          <label for="salesmancode" class="field-label">Salesman Code *</label>
+          <input
+            id="salesmancode"
+            type="text"
+            formControlName="salesmancode"
+            (input)="onCodeInput()"
+            class="control-input uppercase"
+            [class.is-invalid]="isInvalid('salesmancode') || !!codeConflictError"
+            [readonly]="editMode"
+            placeholder="e.g. SM001"
+            maxlength="20"
+          />
+          <div *ngIf="codeConflictError" class="field-error-text">
+            {{ codeConflictError }}
+          </div>
+          <div *ngIf="isInvalid('salesmancode') && !codeConflictError" class="field-error-text">
+            {{ getErrorMessage('salesmancode') }}
+          </div>
+        </div>
+
+        <div class="form-field">
+          <label for="salesmanname" class="field-label">Salesman Name *</label>
+          <input
+            id="salesmanname"
+            type="text"
+            formControlName="salesmanname"
+            class="control-input"
+            [class.is-invalid]="isInvalid('salesmanname')"
+            placeholder="Enter full name"
+            maxlength="100"
+          />
+          <div *ngIf="isInvalid('salesmanname')" class="field-error-text">
+            {{ getErrorMessage('salesmanname') }}
+          </div>
+        </div>
+
+        <!-- Row 2: Mobile No * (left) | Email * (right) -->
+        <div class="form-field">
+          <label for="mobileno" class="field-label">Mobile No *</label>
+          <input
+            id="mobileno"
+            type="text"
+            formControlName="mobileno"
+            (input)="onMobileInput()"
+            class="control-input"
+            [class.is-invalid]="isInvalid('mobileno') || !!mobileConflictError"
+            placeholder="Digits only, 7 to 15"
+            maxlength="15"
+          />
+          <div *ngIf="mobileConflictError" class="field-error-text">
+            {{ mobileConflictError }}
+          </div>
+          <div *ngIf="isInvalid('mobileno') && !mobileConflictError" class="field-error-text">
+            {{ getErrorMessage('mobileno') }}
+          </div>
+        </div>
+
+        <div class="form-field">
+          <label for="email" class="field-label">Email *</label>
+          <input
+            id="email"
+            type="email"
+            formControlName="email"
+            (input)="onEmailInput()"
+            class="control-input"
+            [class.is-invalid]="isInvalid('email') || !!emailConflictError"
+            placeholder="name@company.com"
+            maxlength="100"
+          />
+          <div *ngIf="emailConflictError" class="field-error-text">
+            {{ emailConflictError }}
+          </div>
+          <div *ngIf="isInvalid('email') && !emailConflictError" class="field-error-text">
+            {{ getErrorMessage('email') }}
+          </div>
+        </div>
+
+        <!-- Row 3: Joining Date * (left) | Status * (right) -->
+        <div class="form-field">
+          <label for="joiningdate" class="field-label">Joining Date *</label>
+          <input
+            id="joiningdate"
+            type="date"
+            formControlName="joiningdate"
+            class="control-input"
+            [class.is-invalid]="isInvalid('joiningdate')"
+            placeholder="dd-MMM-yyyy"
+          />
+          <div *ngIf="isInvalid('joiningdate')" class="field-error-text">
+            {{ getErrorMessage('joiningdate') }}
+          </div>
+          <span *ngIf="!isInvalid('joiningdate')" class="field-hint-text">Cannot be a future date.</span>
+        </div>
+
+        
+      </div>
+
+      <!-- Action Buttons matching Wireframe: [Save] [Save & New] [Cancel] -->
+      <div class="wireframe-form-actions mt-6">
+        <div class="flex items-center gap-3">
+          <button type="submit" class="btn btn-primary" [disabled]="saving">
+            {{ saving ? 'Saving...' : 'Save' }}
+          </button>
+
+          <button
+            *ngIf="!editMode"
+            type="button"
+            class="btn btn-secondary"
+            (click)="save(true)"
+            [disabled]="saving"
+          >
+            Save &amp; New
+          </button>
+
+          <a routerLink="/salesman" class="btn btn-secondary">
+            Cancel
+          </a>
+        </div>
+
+        <div class="text-xs text-muted">
+          * required
+        </div>
+      </div>
+    </form>
+  </div>
+</div>

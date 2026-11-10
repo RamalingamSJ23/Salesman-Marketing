@@ -1,0 +1,115 @@
+<div class="page-container max-w-5xl" *ngIf="team as currentTeam; else loadingOrError">
+  <!-- Top Header matching Wireframe Page 11 -->
+  <div class="wireframe-header">
+    <div class="wireframe-title-wrap">
+      <h1 class="wireframe-title">{{ currentTeam.teamcode }} &bull; {{ currentTeam.teamname }}</h1>
+    </div>
+    <div class="flex items-center gap-2">
+      <a [routerLink]="['/marketing-team', currentTeam.id, 'edit']" class="btn btn-primary btn-sm">
+        Edit
+      </a>
+      <a routerLink="/marketing-team" class="btn btn-secondary btn-sm">
+        Back to list
+      </a>
+    </div>
+  </div>
+
+  <!-- Read-only Header Section matching Wireframe Page 11 -->
+  <div class="content-card p-6 mb-6">
+    <div class="view-grid">
+      <!-- Left Column -->
+      <div class="view-prop">
+        <span class="prop-label">Team Code</span>
+        <span class="prop-value font-bold font-mono">{{ currentTeam.teamcode }}</span>
+      </div>
+
+      <!-- Right Column -->
+      <div class="view-prop">
+        <span class="prop-label">Team Leader</span>
+        <span class="prop-value font-bold text-slate-800">{{ currentTeam.teamleadername }}</span>
+      </div>
+
+      <!-- Left Column -->
+      <div class="view-prop">
+        <span class="prop-label">Team Name</span>
+        <span class="prop-value">{{ currentTeam.teamname }}</span>
+      </div>
+
+      <!-- Right Column -->
+      <div class="view-prop">
+        <span class="prop-label">Status</span>
+        <span class="badge" [class.badge-active]="currentTeam.status === 1" [class.badge-inactive]="currentTeam.status === 2">
+          {{ currentTeam.status === 1 ? 'Active' : 'Inactive' }}
+        </span>
+      </div>
+
+      <!-- Left Column full width -->
+      <div class="view-prop full-col">
+        <span class="prop-label">Description</span>
+        <span class="prop-value text-slate-600">{{ currentTeam.description || '-' }}</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Read-only Members Grid matching Wireframe Page 11 -->
+  <div class="content-card p-6">
+    <h2 class="section-heading mb-3">
+      Team Members ({{ currentTeam.members.length }})
+    </h2>
+
+    <div class="table-container">
+      <ejs-grid [dataSource]="currentTeam.members">
+        <e-columns>
+          <e-column field="salesmancode" headerText="Salesman Code" width="140">
+            <ng-template #template let-data>
+              <span class="font-mono font-medium">{{ data.salesmancode }}</span>
+            </ng-template>
+          </e-column>
+          <e-column field="salesmanname" headerText="Salesman" width="220">
+            <ng-template #template let-data>
+              <span class="font-medium text-slate-800">{{ data.salesmanname }}</span>
+            </ng-template>
+          </e-column>
+          <e-column field="roleName" headerText="Role" width="180">
+            <ng-template #template let-data>
+              <span>{{ data.roleName }}</span>
+            </ng-template>
+          </e-column>
+          <e-column field="targetamount" headerText="Target Amount" width="160" textAlign="Right">
+            <ng-template #template let-data>
+              <span class="font-mono">{{ data.targetamount | number: '1.2-2' }}</span>
+            </ng-template>
+          </e-column>
+          <e-column field="status" headerText="Status" width="120">
+            <ng-template #template let-data>
+              <span class="badge" [class.badge-active]="data.status === 1" [class.badge-inactive]="data.status === 2">
+                {{ data.status === 1 ? 'Active' : 'Inactive' }}
+              </span>
+            </ng-template>
+          </e-column>
+        </e-columns>
+      </ejs-grid>
+      <div class="mt-4 p-3 bg-slate-50 border border-slate-200 rounded flex justify-end items-center gap-4">
+        <span class="font-bold text-slate-700">Total target:</span>
+        <span class="font-bold font-mono text-slate-900 text-base">
+          {{ totalTarget | number: '1.2-2' }}
+        </span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<ng-template #loadingOrError>
+  <div class="page-container max-w-5xl">
+    <div *ngIf="loading" class="content-card text-center py-8">
+      <span class="spinner-sm"></span> Loading team details...
+    </div>
+
+    <div *ngIf="errorMessage && !loading" class="alert-box alert-error">
+      {{ errorMessage }}
+      <div class="mt-3">
+        <a routerLink="/marketing-team" class="btn btn-secondary btn-sm">&larr; Back to list</a>
+      </div>
+    </div>
+  </div>
+</ng-template>
