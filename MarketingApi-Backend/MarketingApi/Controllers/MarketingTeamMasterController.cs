@@ -36,7 +36,7 @@ public class MarketingTeamMasterController : ControllerBase
         return result.ToActionResult(this);
     }
 
-    [HttpGet("role-options")]
+    [HttpGet("role-options")] 
     public IActionResult GetRoleOptions()
     {
         var options = _marketingTeamService.GetRoleOptions();
@@ -46,7 +46,7 @@ public class MarketingTeamMasterController : ControllerBase
     [HttpPost]
     public async Task<IActionResult> CreateTeam([FromBody] CreateMarketingTeamDto dto)
     {
-        var result = await _marketingTeamService.CreateTeamAsync(dto);
+        var result = await _marketingTeamService.CreateTeamAsync(dto); 
         return result.ToActionResult(this, nameof(GetById), data => new { id = data.Id });
     }
 
